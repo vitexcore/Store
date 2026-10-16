@@ -24,7 +24,7 @@ export function Topbar({ onMenuClick, sidebarOpen, title }: TopbarProps) {
 
       <h1 className="text-base font-semibold text-slate-900">{title}</h1>
 
-      {/* Right-side placeholder actions — expanded in Day 2 with auth */}
+      {/* Right-side actions */}
       <div className="ml-auto flex items-center gap-2">
         <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800">
           <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />

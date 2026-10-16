@@ -4,7 +4,7 @@
  *
  * Security notes:
  *  - Never sends credentials (cookies, tokens) stored in localStorage.
- *  - Auth credentials will be sent as HttpOnly cookies (Day 2).
+ *  - Auth credentials will be sent as HttpOnly cookies once authentication is implemented.
  *  - Never trusts client-submitted payment status — that comes from the server only.
  *  - Response bodies are treated as untrusted data and validated before use.
  */
