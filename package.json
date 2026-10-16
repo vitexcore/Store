@@ -1,0 +1,21 @@
+{
+  "name": "store",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Store — fintech-style demo point-of-sale and merchant management platform",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @store/shared build && pnpm --parallel --filter @store/backend --filter @store/frontend dev",
+    "build": "pnpm --filter @store/shared build && pnpm --filter @store/backend --filter @store/frontend build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "db:migrate": "pnpm --filter backend db:migrate",
+    "db:migrate:rollback": "pnpm --filter backend db:migrate:rollback"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3"
+  }
+}

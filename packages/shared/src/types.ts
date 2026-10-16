@@ -1,0 +1,107 @@
+// ---------------------------------------------------------------------------
+// Domain entity shapes shared between backend and frontend.
+// These are plain data shapes, NOT ORM models. Keep them free of DB-specific types.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Enumerations
+// ---------------------------------------------------------------------------
+
+export type UserRole = 'admin' | 'merchant' | 'staff';
+
+export type ProductStatus = 'active' | 'draft' | 'archived';
+
+export type OrderStatus = 'pending' | 'confirmed' | 'cancelled' | 'refunded';
+
+export type PaymentStatus =
+  | 'pending'
+  | 'awaiting_payment'
+  | 'paid'
+  | 'failed'
+  | 'expired'
+  | 'cancelled';
+
+// ---------------------------------------------------------------------------
+// Users / Stores
+// ---------------------------------------------------------------------------
+
+export interface Store {
+  id: string;
+  name: string;
+  slug: string;
+  createdAt: string;
+}
+
+export interface User {
+  id: string;
+  email: string;
+  role: UserRole;
+  storeId: string | null;
+  createdAt: string;
+}
+
+// Password, tokens, and secret fields are NEVER included in these shapes.
+// They are stripped server-side before sending to any client.
+
+// ---------------------------------------------------------------------------
+// Products
+// ---------------------------------------------------------------------------
+
+export interface Product {
+  id: string;
+  storeId: string;
+  name: string;
+  description: string;
+  priceCents: number;
+  currency: string;
+  status: ProductStatus;
+  imageUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+export interface OrderItem {
+  id: string;
+  orderId: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPriceCents: number;
+  totalCents: number;
+}
+
+export interface Order {
+  id: string;
+  storeId: string;
+  reference: string;
+  status: OrderStatus;
+  totalCents: number;
+  currency: string;
+  customerName: string | null;
+  customerEmail: string | null;
+  items: OrderItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Transactions / Payments
+// ---------------------------------------------------------------------------
+
+export interface Transaction {
+  id: string;
+  storeId: string;
+  orderId: string;
+  orderReference: string;
+  status: PaymentStatus;
+  amountCents: number;
+  currency: string;
+  /** Expiry for the payment request. Never trust as proof of payment on the client. */
+  expiresAt: string | null;
+  paidAt: string | null;
+  createdAt: string;
+}
