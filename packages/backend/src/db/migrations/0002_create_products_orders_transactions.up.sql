@@ -1,8 +1,8 @@
 -- Migration: 0002 — create products, orders, order_items, transactions tables
 
--- ---------------------------------------------------------------------------
+
 -- Products
--- ---------------------------------------------------------------------------
+
 CREATE TABLE IF NOT EXISTS products (
   id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   store_id     UUID        NOT NULL REFERENCES stores (id) ON DELETE CASCADE,
@@ -20,9 +20,7 @@ CREATE TABLE IF NOT EXISTS products (
 CREATE INDEX IF NOT EXISTS idx_products_store_id ON products (store_id);
 CREATE INDEX IF NOT EXISTS idx_products_status   ON products (status);
 
--- ---------------------------------------------------------------------------
--- Orders
--- ---------------------------------------------------------------------------
+---Orders
 CREATE TABLE IF NOT EXISTS orders (
   id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   store_id        UUID        NOT NULL REFERENCES stores (id) ON DELETE RESTRICT,
