@@ -1,5 +1,8 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AppLayout } from './components/layout/AppLayout.tsx';
+import { ProtectedRoute } from './components/ProtectedRoute.tsx';
+import { LoginPage } from './pages/LoginPage.tsx';
+import { RegisterPage } from './pages/RegisterPage.tsx';
 import { DashboardPage } from './pages/DashboardPage.tsx';
 import { ProductsPage } from './pages/ProductsPage.tsx';
 import { OrdersPage } from './pages/OrdersPage.tsx';
@@ -11,12 +14,20 @@ import { NotFoundPage } from './pages/NotFoundPage.tsx';
 export default function App() {
   return (
     <Routes>
+      {/* Auth routes — public, no auth required */}
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
+
       {/* Redirect root to dashboard */}
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-      {/* Main application shell */}
+      {/* Main application shell — protected routes */}
       <Route
-        element={<AppLayout />}
+        element={
+          <ProtectedRoute>
+            <AppLayout />
+          </ProtectedRoute>
+        }
         handle={{ title: 'Store' }}
       >
         <Route

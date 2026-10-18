@@ -44,6 +44,31 @@ export interface User {
 // They are stripped server-side before sending to any client.
 
 // ---------------------------------------------------------------------------
+// Authentication & Session
+// ---------------------------------------------------------------------------
+
+/** Safe user shape returned by auth endpoints — never includes password_hash. */
+export interface AuthUser {
+  id: string;
+  email: string;
+  role: UserRole;
+  storeId: string | null;
+  storeName: string | null;
+  storeSlug: string | null;
+  createdAt: string;
+}
+
+/** Response from POST /api/auth/register and POST /api/auth/login */
+export interface AuthSession {
+  user: AuthUser;
+}
+
+/** Response from GET /api/auth/me — returns null user when unauthenticated */
+export interface AuthMeResponse {
+  user: AuthUser | null;
+}
+
+// ---------------------------------------------------------------------------
 // Products
 // ---------------------------------------------------------------------------
 

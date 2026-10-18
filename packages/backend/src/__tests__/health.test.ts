@@ -77,22 +77,23 @@ describe('Security headers', () => {
 
 describe('404 handling', () => {
   it('returns 404 JSON for unknown routes', async () => {
-    const res = await request(app).get('/api/nonexistent-route-xyz');
+    const res = await request(app).get('/nonexistent-route-xyz');
     expect(res.status).toBe(404);
     expect(res.body.ok).toBe(false);
     expect(res.body.code).toBe('NOT_FOUND');
   });
 
   it('does not leak route information in 404 body', async () => {
-    const res = await request(app).get('/api/nonexistent-route-xyz');
+    const res = await request(app).get('/nonexistent-route-xyz');
     expect(JSON.stringify(res.body)).not.toMatch(/stack/i);
   });
 });
 
-describe('GET /api/dashboard (stub)', () => {
-  it('returns 200 with ok: true', async () => {
+describe('GET /api/dashboard (auth required)', () => {
+  it('returns 401 when unauthenticated', async () => {
     const res = await request(app).get('/api/dashboard');
-    expect(res.status).toBe(200);
-    expect(res.body.ok).toBe(true);
+    expect(res.status).toBe(401);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.code).toBe('UNAUTHENTICATED');
   });
 });

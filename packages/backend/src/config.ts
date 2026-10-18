@@ -52,14 +52,16 @@ export const config = {
   // CORS — only the listed origin(s) are allowed
   corsOrigin: optional('CORS_ORIGIN', 'http://localhost:5173'),
 
-  // Session — used in later days; placeholder here
-  sessionSecret: optional('SESSION_SECRET', ''),
+  // Session security
+  sessionSecret: required('SESSION_SECRET'),
+  sessionCookieName: optional('SESSION_COOKIE_NAME', 'store.sid'),
+  sessionMaxAge: optionalInt('SESSION_MAX_AGE', 86_400), // 24 hours in seconds
 
   // Feature flags
   logLevel: optional('LOG_LEVEL', 'info'),
 } as const;
 
-// Validate session secret length in production
-if (config.env === 'production' && config.sessionSecret.length < 32) {
+// Validate session secret length in production AND test — dev allows placeholder for convenience
+if (config.env !== 'development' && config.sessionSecret.length < 32) {
   throw new Error('SESSION_SECRET must be at least 32 characters in production');
 }
