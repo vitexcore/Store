@@ -5,13 +5,26 @@
  * the expected accessible text and ARIA elements.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { DashboardPage } from '../pages/DashboardPage.tsx';
 import { CheckoutPage } from '../pages/CheckoutPage.tsx';
 import { AssistantPage } from '../pages/AssistantPage.tsx';
 import { NotFoundPage } from '../pages/NotFoundPage.tsx';
+
+// Mock the api module so DashboardPage doesn't make real HTTP calls in tests
+vi.mock('../lib/api.js', () => ({
+  api: {
+    dashboard: {
+      get: vi.fn().mockResolvedValue({ ok: false, code: 'NETWORK_ERROR', message: 'No server in test' }),
+    },
+  },
+}));
+// Mock useAuth so DashboardPage can render without an AuthProvider
+vi.mock('../lib/auth.js', () => ({
+  useAuth: () => ({ user: { storeName: 'Test Store' } }),
+}));
 
 function Wrapper({ children }: { children: React.ReactNode }) {
   return <MemoryRouter>{children}</MemoryRouter>;
@@ -23,10 +36,9 @@ describe('DashboardPage', () => {
     expect(screen.getByRole('heading', { name: /dashboard/i })).toBeInTheDocument();
   });
 
-  it('renders metric card labels', () => {
+  it('renders loading state initially', () => {
     render(<DashboardPage />, { wrapper: Wrapper });
-    expect(screen.getByText(/total revenue/i)).toBeInTheDocument();
-    expect(screen.getByText(/orders today/i)).toBeInTheDocument();
+    expect(screen.getByRole('status')).toBeInTheDocument();
   });
 });
 

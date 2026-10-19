@@ -29,6 +29,34 @@ export interface Store {
   id: string;
   name: string;
   slug: string;
+  description: string | null;
+  contactEmail: string | null;
+  address: string | null;
+  defaultCurrency: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard
+// ---------------------------------------------------------------------------
+
+export interface DashboardMetrics {
+  totalRevenueCents: number;
+  currency: string;
+  confirmedOrderCount: number;
+  activeProductCount: number;
+  lowStockProductCount: number;
+  recentOrders: RecentOrderSummary[];
+}
+
+export interface RecentOrderSummary {
+  id: string;
+  reference: string;
+  status: OrderStatus;
+  totalCents: number;
+  currency: string;
+  customerName: string | null;
   createdAt: string;
 }
 
@@ -81,8 +109,24 @@ export interface Product {
   currency: string;
   status: ProductStatus;
   imageUrl: string | null;
+  stockQuantity: number;
+  lowStockThreshold: number;
   createdAt: string;
   updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Inventory
+// ---------------------------------------------------------------------------
+
+export interface InventoryAdjustment {
+  id: string;
+  storeId: string;
+  productId: string;
+  userId: string;
+  delta: number;
+  reason: string;
+  createdAt: string;
 }
 
 // ---------------------------------------------------------------------------

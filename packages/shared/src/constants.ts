@@ -12,11 +12,14 @@ export type SupportedCurrency = (typeof SUPPORTED_CURRENCIES)[number];
 /** Maximum lengths for user-supplied text fields. Enforced on both client and server. */
 export const MAX_LENGTHS = {
   storeName: 120,
+  storeDescription: 1000,
+  storeAddress: 500,
   productName: 200,
   productDescription: 2000,
   customerName: 200,
   customerEmail: 254,
   orderReference: 64,
+  adjustmentReason: 500,
 } as const;
 
 /** Default pagination page size. */

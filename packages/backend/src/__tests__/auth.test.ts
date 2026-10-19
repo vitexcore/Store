@@ -578,14 +578,14 @@ describe('Store ownership and data isolation', () => {
     // Merchant A should see only their 2 products
     const listA = await authedRequest('get', '/api/products', merchantA.cookies, merchantA.csrfToken);
     expect(listA.status).toBe(200);
-    expect(listA.body.data.length).toBe(2);
-    expect(listA.body.data.every((p: { name: string }) => p.name.startsWith(`Product-A`))).toBe(true);
+    expect(listA.body.data.items.length).toBe(2);
+    expect(listA.body.data.items.every((p: { name: string }) => p.name.startsWith(`Product-A`))).toBe(true);
 
     // Merchant B should see only their 1 product
     const listB = await authedRequest('get', '/api/products', merchantB.cookies, merchantB.csrfToken);
     expect(listB.status).toBe(200);
-    expect(listB.body.data.length).toBe(1);
-    expect(listB.body.data[0].name).toBe(`Product-B1-${suffix}`);
+    expect(listB.body.data.items.length).toBe(1);
+    expect(listB.body.data.items[0].name).toBe(`Product-B1-${suffix}`);
   });
 });
 

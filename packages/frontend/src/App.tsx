@@ -9,6 +9,7 @@ import { OrdersPage } from './pages/OrdersPage.tsx';
 import { TransactionsPage } from './pages/TransactionsPage.tsx';
 import { CheckoutPage } from './pages/CheckoutPage.tsx';
 import { AssistantPage } from './pages/AssistantPage.tsx';
+import { StoreSettingsPage } from './pages/StoreSettingsPage.tsx';
 import { NotFoundPage } from './pages/NotFoundPage.tsx';
 
 export default function App() {
@@ -30,36 +31,13 @@ export default function App() {
         }
         handle={{ title: 'Store' }}
       >
-        <Route
-          path="/dashboard"
-          element={<DashboardPage />}
-          handle={{ title: 'Dashboard' }}
-        />
-        <Route
-          path="/products"
-          element={<ProductsPage />}
-          handle={{ title: 'Products' }}
-        />
-        <Route
-          path="/orders"
-          element={<OrdersPage />}
-          handle={{ title: 'Orders' }}
-        />
-        <Route
-          path="/transactions"
-          element={<TransactionsPage />}
-          handle={{ title: 'Transactions' }}
-        />
-        <Route
-          path="/checkout"
-          element={<CheckoutPage />}
-          handle={{ title: 'QR Checkout' }}
-        />
-        <Route
-          path="/assistant"
-          element={<AssistantPage />}
-          handle={{ title: 'AI Assistant' }}
-        />
+        <Route path="/dashboard" element={<DashboardPage />} handle={{ title: 'Dashboard' }} />
+        <Route path="/products" element={<ProductsPage />} handle={{ title: 'Products' }} />
+        <Route path="/orders" element={<OrdersPage />} handle={{ title: 'Orders' }} />
+        <Route path="/transactions" element={<TransactionsPage />} handle={{ title: 'Transactions' }} />
+        <Route path="/checkout" element={<CheckoutPage />} handle={{ title: 'QR Checkout' }} />
+        <Route path="/assistant" element={<AssistantPage />} handle={{ title: 'AI Assistant' }} />
+        <Route path="/settings" element={<StoreSettingsPage />} handle={{ title: 'Store Settings' }} />
       </Route>
 
       {/* Catch-all */}

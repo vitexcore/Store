@@ -1,16 +1,3 @@
-/**
- * Authentication routes: register, login, logout, me.
- *
- * Security notes:
- *  - Registration creates a store + merchant user atomically in a transaction.
- *  - Login uses generic error messages to avoid revealing account existence.
- *  - Logout destroys the server-side session (not just clears the cookie).
- *  - Session is regenerated after login/register to prevent session fixation attacks.
- *  - Rate limiting is applied per-route for auth endpoints.
- *  - Passwords are hashed with Argon2id before storage.
- *  - The /me endpoint returns the current session user or null (never an error).
- */
-
 import { Router, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { query } from '../db/pool.js';
@@ -22,9 +9,9 @@ import { isValidEmail, isNonEmptyString } from '@store/shared';
 
 export const authRouter = Router();
 
-// ---------------------------------------------------------------------------
+
 // Rate limits for auth endpoints — stricter than global limit
-// ---------------------------------------------------------------------------
+
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -40,9 +27,8 @@ const authLimiter = rateLimit({
   },
 });
 
-// ---------------------------------------------------------------------------
+
 // Validation helpers
-// ---------------------------------------------------------------------------
 
 const EMAIL_MAX = 254;
 const PASSWORD_MIN = 8;

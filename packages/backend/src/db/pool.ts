@@ -53,6 +53,11 @@ export async function checkDatabaseHealth(): Promise<'ok' | 'error'> {
   }
 }
 
+/** Get a client from the pool for use in multi-statement transactions. Remember to release(). */
+export async function getClient(): Promise<pg.PoolClient> {
+  return getPool().connect();
+}
+
 /** Close the pool — used in tests and graceful shutdown. */
 export async function closePool(): Promise<void> {
   if (_pool) {
