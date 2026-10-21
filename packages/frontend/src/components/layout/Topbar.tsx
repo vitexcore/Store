@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../lib/auth.tsx';
+import { ThemeToggle } from '../ui/ThemeToggle.tsx';
 
 interface TopbarProps {
   onMenuClick: () => void;
-  /** Whether the mobile sidebar is currently open — used for aria-expanded */
   sidebarOpen: boolean;
   title: string;
 }
@@ -15,7 +15,6 @@ export function Topbar({ onMenuClick, sidebarOpen, title }: TopbarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close menu on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -32,14 +31,10 @@ export function Topbar({ onMenuClick, sidebarOpen, title }: TopbarProps) {
     navigate('/login', { replace: true });
   }
 
-  // Get initials for the avatar
-  const initials = user?.email
-    ? user.email.substring(0, 2).toUpperCase()
-    : '??';
+  const initials = user?.email ? user.email.substring(0, 2).toUpperCase() : '??';
 
   return (
-    <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b border-border bg-white px-4 lg:px-6">
-      {/* Mobile menu button */}
+    <header className="sticky top-0 z-10 flex h-16 items-center gap-4 border-b border-border bg-white dark:bg-slate-900 dark:border-slate-700 px-4 lg:px-6">
       <button
         type="button"
         className="btn-ghost -ml-1 p-2 lg:hidden"
@@ -53,26 +48,26 @@ export function Topbar({ onMenuClick, sidebarOpen, title }: TopbarProps) {
         </svg>
       </button>
 
-      <h1 className="text-base font-semibold text-slate-900">{title}</h1>
+      <h1 className="text-base font-semibold text-slate-900 dark:text-slate-100">{title}</h1>
 
-      {/* Right-side actions */}
-      <div className="ml-auto flex items-center gap-3">
-        <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800">
+      <div className="ml-auto flex items-center gap-2">
+        <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-amber-100 dark:bg-amber-900/40 px-2.5 py-1 text-xs font-medium text-amber-800 dark:text-amber-300">
           <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
           Demo
         </span>
 
-        {/* User menu */}
+        <ThemeToggle />
+
         <div className="relative" ref={menuRef}>
           <button
             type="button"
-            className="flex items-center gap-2 rounded-lg p-1.5 text-sm font-medium text-slate-700 hover:bg-surface-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+            className="flex items-center gap-2 rounded-lg p-1.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-surface-raised dark:hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900"
             onClick={() => setMenuOpen((prev) => !prev)}
             aria-haspopup="true"
             aria-expanded={menuOpen}
             aria-label="User menu"
           >
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 dark:bg-brand-900/60 text-xs font-semibold text-brand-700 dark:text-brand-300">
               {initials}
             </span>
             <span className="hidden sm:inline max-w-[160px] truncate">{user?.storeName ?? user?.email}</span>
@@ -82,15 +77,15 @@ export function Topbar({ onMenuClick, sidebarOpen, title }: TopbarProps) {
           </button>
 
           {menuOpen && (
-            <div className="absolute right-0 top-full mt-2 w-56 rounded-lg border border-border bg-white py-1 shadow-card-hover" role="menu">
-              <div className="border-b border-border px-4 py-2">
-                <p className="truncate text-sm font-medium text-slate-900">{user?.email}</p>
-                <p className="truncate text-xs text-slate-500">{user?.storeName ?? 'No store'}</p>
+            <div className="absolute right-0 top-full mt-2 w-56 rounded-lg border border-border dark:border-slate-700 bg-white dark:bg-slate-800 py-1 shadow-card-hover" role="menu">
+              <div className="border-b border-border dark:border-slate-700 px-4 py-2">
+                <p className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{user?.email}</p>
+                <p className="truncate text-xs text-slate-500 dark:text-slate-400">{user?.storeName ?? 'No store'}</p>
               </div>
               <button
                 type="button"
                 onClick={handleLogout}
-                className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-surface-raised"
+                className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-surface-raised dark:hover:bg-slate-700"
                 role="menuitem"
               >
                 <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4">

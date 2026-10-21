@@ -59,6 +59,14 @@ export const config = {
 
   // Feature flags
   logLevel: optional('LOG_LEVEL', 'info'),
+
+  // Paystack — test mode only. Use sk_test_... key.
+  // Keep secret key server-side; never expose to frontend or logs.
+  paystackSecretKey: process.env['PAYSTACK_SECRET_KEY'] ?? null,
+
+  // Callback URL for Paystack redirect after payment (must be a trusted, configured URL).
+  // The callback does NOT mark payment as successful — webhook verification does.
+  paystackCallbackUrl: optional('PAYSTACK_CALLBACK_URL', 'http://localhost:5173/payment/callback'),
 } as const;
 
 // Validate session secret length in production AND test — dev allows placeholder for convenience

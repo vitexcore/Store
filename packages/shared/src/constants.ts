@@ -5,9 +5,15 @@
 export const APP_NAME = 'Store' as const;
 export const APP_VERSION = '0.0.1' as const;
 
-/** Supported currency codes. Extended as needed. */
-export const SUPPORTED_CURRENCIES = ['GBP', 'USD', 'EUR'] as const;
+/** Supported currency codes. NGN is the default for Store. */
+export const SUPPORTED_CURRENCIES = ['GBP', 'USD', 'EUR', 'NGN'] as const;
 export type SupportedCurrency = (typeof SUPPORTED_CURRENCIES)[number];
+
+/** Default currency for new stores, orders, and payment requests. */
+export const DEFAULT_CURRENCY: SupportedCurrency = 'NGN';
+
+/** Payment expiry in minutes for a payment request. */
+export const PAYMENT_EXPIRY_MINUTES = 30;
 
 /** Maximum lengths for user-supplied text fields. Enforced on both client and server. */
 export const MAX_LENGTHS = {

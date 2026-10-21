@@ -1,27 +1,21 @@
-/** Status badge — uses both colour and text label (never colour alone). */
-
 import type { ProductStatus, OrderStatus, PaymentStatus } from '@store/shared';
 
 type AnyStatus = ProductStatus | OrderStatus | PaymentStatus | 'low_stock' | 'ok_stock';
 
 const BADGE_CLASSES: Record<string, string> = {
-  // Order statuses
   pending:          'badge-pending',
   confirmed:        'badge-confirmed',
   cancelled:        'badge-cancelled',
   refunded:         'badge-cancelled',
-  // Product statuses
   active:           'badge-active',
   draft:            'badge-draft',
   archived:         'badge-archived',
-  // Payment statuses
   awaiting_payment: 'badge-pending',
   paid:             'badge-confirmed',
   failed:           'badge-failed',
   expired:          'badge-expired',
-  // Inventory
-  low_stock:        'badge bg-amber-100 text-amber-800',
-  ok_stock:         'badge bg-emerald-100 text-emerald-800',
+  low_stock:        'badge bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
+  ok_stock:         'badge bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
 };
 
 const LABELS: Record<string, string> = {
@@ -46,7 +40,7 @@ interface StatusBadgeProps {
 }
 
 export function StatusBadge({ status, label }: StatusBadgeProps) {
-  const cls = BADGE_CLASSES[status] ?? 'badge bg-slate-100 text-slate-600';
+  const cls = BADGE_CLASSES[status] ?? 'badge bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300';
   const text = label ?? LABELS[status] ?? status;
   return <span className={cls}>{text}</span>;
 }

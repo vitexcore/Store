@@ -11,7 +11,7 @@
 
 import { Router, Request, Response, IRouter } from 'express';
 import type { ApiSuccess, ApiError, PaginatedData, ProductStatus } from '@store/shared';
-import { SUPPORTED_CURRENCIES, MAX_LENGTHS } from '@store/shared';
+import { SUPPORTED_CURRENCIES, MAX_LENGTHS, DEFAULT_CURRENCY } from '@store/shared';
 import { isUuid, isNonEmptyString, isNonNegativeInt, isOneOf } from '@store/shared';
 import {
   requireAuth, loadUser, requireStore,
@@ -528,7 +528,7 @@ apiRouter.post('/orders', async (req: Request, res: Response) => {
     return res.status(400).json(body);
   }
 
-  const finalCurrency = isOneOf(currency, SUPPORTED_CURRENCIES) ? currency : 'GBP';
+  const finalCurrency = isOneOf(currency, SUPPORTED_CURRENCIES) ? currency : DEFAULT_CURRENCY;
   const allowedOrderStatuses = ['pending', 'confirmed', 'cancelled', 'refunded'] as const;
   const finalStatus = isOneOf(status, allowedOrderStatuses) ? status : 'pending';
 
@@ -654,25 +654,6 @@ apiRouter.get('/transactions/:id', async (req: Request, res: Response) => {
     const body: ApiError = { ok: false, code: 'INTERNAL_ERROR', message: 'Failed to get transaction.' };
     res.status(500).json(body);
   }
-});
-
-// ---------------------------------------------------------------------------
-// QR Checkout (stub — implemented in later payment stage)
-// ---------------------------------------------------------------------------
-apiRouter.post('/checkout/qr', (_req: Request, res: Response) => {
-  const body: ApiSuccess<{ message: string }> = {
-    ok: true,
-    data: { message: 'Generate QR payment request — implementation coming in a later day.' },
-  };
-  res.status(200).json(body);
-});
-
-apiRouter.get('/checkout/:token', (_req: Request, res: Response) => {
-  const body: ApiSuccess<{ message: string }> = {
-    ok: true,
-    data: { message: 'Get payment request status — implementation coming in a later day.' },
-  };
-  res.status(200).json(body);
 });
 
 // ---------------------------------------------------------------------------

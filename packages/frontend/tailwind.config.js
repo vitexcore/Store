@@ -1,9 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
+  darkMode: 'class',
   theme: {
     extend: {
-      // Design tokens — edit here rather than scattering values across components
       colors: {
         brand: {
           50:  '#f0f9ff',
@@ -27,7 +27,6 @@ export default {
           DEFAULT: '#e2e8f0',
           strong:  '#cbd5e1',
         },
-        // Semantic status colours — never rely on colour alone for status
         status: {
           pending:   '#f59e0b',
           confirmed: '#10b981',

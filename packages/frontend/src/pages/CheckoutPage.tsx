@@ -1,40 +1,120 @@
-/**
- * QR Checkout — generate QR codes for in-person payment collection.
- */
+import { useEffect, useState } from 'react';
+import { api } from '../lib/api.js';
+import { useAuth } from '../lib/auth.js';
+
 export function CheckoutPage() {
+  const { user } = useAuth();
+  const [storeSlug, setStoreSlug] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (user?.storeSlug) {
+      setStoreSlug(user.storeSlug);
+    } else {
+      api.store.get().then((res) => {
+        if (res.ok) setStoreSlug(res.data.slug);
+      });
+    }
+  }, [user]);
+
+  const storefrontUrl = storeSlug ? `${window.location.origin}/store/${storeSlug}` : null;
+
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-slate-900">QR Checkout</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Generate QR codes for in-person payment collection.
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">QR Checkout</h2>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          Share your store link or QR code with customers so they can browse and pay.
         </p>
       </div>
 
-      {/* Simulated payment disclaimer — required by AGENTS.md */}
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 flex gap-3">
-        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5 flex-shrink-0 text-amber-600 mt-0.5">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-        </svg>
+      <div className="rounded-lg border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-900/20 p-4 flex gap-3">
+        <AlertIcon className="h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
         <div>
-          <p className="text-sm font-medium text-amber-800">Demo mode — simulated payments only</p>
-          <p className="mt-0.5 text-xs text-amber-700">
-            This checkout system does not process real money. All transactions shown here are for demonstration purposes only.
+          <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Demo mode — Paystack test mode only</p>
+          <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
+            Payments use Paystack sandbox/test mode and do not transfer real funds.
+            Set <code className="font-mono bg-amber-100 dark:bg-amber-900/40 px-0.5 rounded">PAYSTACK_SECRET_KEY=sk_test_...</code> to enable test payments.
           </p>
         </div>
       </div>
 
-      <div className="card border-dashed bg-surface-subtle">
-        <div className="flex flex-col items-center justify-center py-10 text-center gap-2">
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-10 w-10 text-slate-300">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-          </svg>
-          <p className="text-sm font-medium text-slate-500">QR checkout is not yet available</p>
-          <p className="text-xs text-slate-400 max-w-sm">
-            Select an order and generate a QR code to accept in-person payment. Your customer scans the code to complete the transaction.
-          </p>
-        </div>
+      <div className="card">
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Your Store Link</h3>
+        {storefrontUrl ? (
+          <div className="flex items-center gap-3">
+            <code className="flex-1 rounded-lg border border-border dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2 text-sm font-mono text-slate-700 dark:text-slate-300 break-all">
+              {storefrontUrl}
+            </code>
+            <a
+              href={storefrontUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 transition-colors whitespace-nowrap"
+            >
+              Open →
+            </a>
+          </div>
+        ) : (
+          <div className="h-10 bg-slate-100 dark:bg-slate-700 rounded-lg animate-pulse" />
+        )}
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+          Share this link with customers so they can browse your products and place orders.
+        </p>
+      </div>
+
+      <div className="card">
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">How QR Checkout Works</h3>
+        <ol className="space-y-3">
+          {[
+            {
+              step: '1',
+              title: 'Customer browses your storefront',
+              description: 'Customers visit your store link, browse active products, and add items to their cart.',
+            },
+            {
+              step: '2',
+              title: 'Order is created server-side',
+              description: 'When checking out, the backend validates products, calculates the total server-side, and creates an order with a unique payment reference.',
+            },
+            {
+              step: '3',
+              title: 'QR code displayed for payment',
+              description: 'A QR code containing the payment URL is displayed. The customer scans it or taps "Pay with Paystack".',
+            },
+            {
+              step: '4',
+              title: 'Payment verified via webhook',
+              description: 'After payment, Paystack sends a signed webhook to the backend. The order is only marked as confirmed after cryptographic verification — not from a browser redirect.',
+            },
+          ].map((item) => (
+            <li key={item.step} className="flex gap-4">
+              <span className="flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-full bg-brand-100 dark:bg-brand-900/40 text-xs font-bold text-brand-700 dark:text-brand-300">
+                {item.step}
+              </span>
+              <div>
+                <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{item.title}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{item.description}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-4">
+        <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+          <strong>Security:</strong> Payment status is determined exclusively by Paystack server-side verification via
+          a signed webhook. Scanning a QR code, opening a payment URL, or being redirected back from Paystack
+          does <em>not</em> confirm payment. The order status in your dashboard reflects only verified payments.
+        </p>
       </div>
     </div>
+  );
+}
+
+function AlertIcon({ className }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+    </svg>
   );
 }

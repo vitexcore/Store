@@ -1,8 +1,3 @@
-/**
- * Products — full product catalogue management.
- * List, search/filter, create, edit, archive.
- */
-
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api.js';
 import { StatusBadge } from '../components/ui/StatusBadge.js';
@@ -11,8 +6,8 @@ import { Modal } from '../components/ui/Modal.js';
 import { EmptyState, LoadingSpinner } from '../components/ui/EmptyState.js';
 import type { Product } from '@store/shared';
 
-function formatCurrency(cents: number, currency = 'GBP') {
-  return new Intl.NumberFormat('en-GB', { style: 'currency', currency }).format(cents / 100);
+function formatCurrency(cents: number, currency = 'NGN') {
+  return new Intl.NumberFormat('en-NG', { style: 'currency', currency }).format(cents / 100);
 }
 
 const STATUS_OPTIONS = [
@@ -25,7 +20,7 @@ const STATUS_OPTIONS = [
 interface ProductFormData {
   name: string;
   description: string;
-  price_pounds: string; // user types in £ — converted to cents on submit
+  price_major: string;
   currency: string;
   status: string;
   stock_quantity: string;
@@ -35,8 +30,8 @@ interface ProductFormData {
 const EMPTY_FORM: ProductFormData = {
   name: '',
   description: '',
-  price_pounds: '',
-  currency: 'GBP',
+  price_major: '',
+  currency: 'NGN',
   status: 'draft',
   stock_quantity: '0',
   low_stock_threshold: '5',
@@ -46,7 +41,7 @@ function productToForm(p: Product): ProductFormData {
   return {
     name: p.name,
     description: p.description,
-    price_pounds: (p.priceCents / 100).toFixed(2),
+    price_major: (p.priceCents / 100).toFixed(2),
     currency: p.currency,
     status: p.status,
     stock_quantity: String(p.stockQuantity),
@@ -60,19 +55,16 @@ export function ProductsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [page, setPage] = useState(1);
 
-  // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [form, setForm] = useState<ProductFormData>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Archive confirm
   const [archiveTarget, setArchiveTarget] = useState<Product | null>(null);
   const [archiving, setArchiving] = useState(false);
 
@@ -90,8 +82,6 @@ export function ProductsPage() {
   }, [page, search, statusFilter]);
 
   useEffect(() => { load(); }, [load]);
-
-  // Reset to page 1 when filters change
   useEffect(() => { setPage(1); }, [search, statusFilter]);
 
   function openCreate() {
@@ -110,9 +100,9 @@ export function ProductsPage() {
 
   async function handleSave() {
     setFormError(null);
-    const priceCents = Math.round(parseFloat(form.price_pounds) * 100);
+    const priceCents = Math.round(parseFloat(form.price_major) * 100);
     if (!form.name.trim()) { setFormError('Product name is required.'); return; }
-    if (isNaN(priceCents) || priceCents < 0) { setFormError('Enter a valid price (e.g. 9.99).'); return; }
+    if (isNaN(priceCents) || priceCents < 0) { setFormError('Enter a valid price (e.g. 1500.00).'); return; }
     const stockQty = parseInt(form.stock_quantity, 10);
     if (isNaN(stockQty) || stockQty < 0) { setFormError('Stock quantity must be 0 or more.'); return; }
     const threshold = parseInt(form.low_stock_threshold, 10);
@@ -161,11 +151,10 @@ export function ProductsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-slate-900">Products</h2>
-          <p className="mt-1 text-sm text-slate-500">Manage your store's product catalogue.</p>
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Products</h2>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Manage your store's product catalogue.</p>
         </div>
         <button type="button" className="btn-primary" onClick={openCreate}>
           <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
@@ -175,37 +164,21 @@ export function ProductsPage() {
         </button>
       </div>
 
-      {/* Filters */}
       <div className="flex flex-col gap-3 sm:flex-row">
-        <input
-          type="search"
-          className="input sm:max-w-xs"
-          placeholder="Search products…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          aria-label="Search products"
-        />
-        <select
-          className="input sm:max-w-[180px]"
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          aria-label="Filter by status"
-        >
+        <input type="search" className="input sm:max-w-xs" placeholder="Search products…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search products" />
+        <select className="input sm:max-w-[180px]" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
           {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </div>
 
-      {/* Error */}
       {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700" role="alert">
+        <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-300" role="alert">
           {error}
         </div>
       )}
 
-      {/* Loading */}
       {loading && <LoadingSpinner label="Loading products…" />}
 
-      {/* Empty */}
       {!loading && products.length === 0 && (
         <EmptyState
           title="No products found"
@@ -216,52 +189,41 @@ export function ProductsPage() {
         />
       )}
 
-      {/* Table */}
       {!loading && products.length > 0 && (
         <div className="card p-0 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border bg-surface-subtle">
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500">Product</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500">Status</th>
-                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wide text-slate-500">Price</th>
-                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wide text-slate-500">Stock</th>
-                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wide text-slate-500">Actions</th>
+                <tr className="border-b border-border dark:border-slate-700 bg-surface-subtle dark:bg-slate-900/50">
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Product</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Status</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Price</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Stock</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody className="divide-y divide-border dark:divide-slate-700">
                 {products.map((p) => {
                   const isLow = p.stockQuantity <= p.lowStockThreshold;
                   return (
-                    <tr key={p.id} className="hover:bg-surface-subtle transition-colors">
+                    <tr key={p.id} className="hover:bg-surface-subtle dark:hover:bg-slate-700/40 transition-colors">
                       <td className="px-6 py-3">
-                        <p className="font-medium text-slate-900">{p.name}</p>
-                        {p.description && <p className="text-xs text-slate-400 truncate max-w-xs">{p.description}</p>}
+                        <p className="font-medium text-slate-900 dark:text-slate-100">{p.name}</p>
+                        {p.description && <p className="text-xs text-slate-400 dark:text-slate-500 truncate max-w-xs">{p.description}</p>}
                       </td>
                       <td className="px-6 py-3"><StatusBadge status={p.status} /></td>
-                      <td className="px-6 py-3 text-right font-medium text-slate-900">{formatCurrency(p.priceCents, p.currency)}</td>
+                      <td className="px-6 py-3 text-right font-medium text-slate-900 dark:text-slate-100">{formatCurrency(p.priceCents, p.currency)}</td>
                       <td className="px-6 py-3 text-right">
-                        <span className={`font-mono text-sm ${isLow ? 'text-amber-700 font-semibold' : 'text-slate-700'}`}>
+                        <span className={`font-mono text-sm ${isLow ? 'text-amber-700 dark:text-amber-400 font-semibold' : 'text-slate-700 dark:text-slate-300'}`}>
                           {p.stockQuantity}
                         </span>
-                        {isLow && <span className="ml-1 text-xs text-amber-600">low</span>}
+                        {isLow && <span className="ml-1 text-xs text-amber-600 dark:text-amber-400">low</span>}
                       </td>
                       <td className="px-6 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            className="btn-ghost px-2 py-1 text-xs"
-                            onClick={() => openEdit(p)}
-                          >
-                            Edit
-                          </button>
+                          <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => openEdit(p)}>Edit</button>
                           {p.status !== 'archived' && (
-                            <button
-                              type="button"
-                              className="btn-ghost px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
-                              onClick={() => setArchiveTarget(p)}
-                            >
+                            <button type="button" className="btn-ghost px-2 py-1 text-xs text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20" onClick={() => setArchiveTarget(p)}>
                               Archive
                             </button>
                           )}
@@ -274,18 +236,11 @@ export function ProductsPage() {
             </table>
           </div>
           <div className="px-6">
-            <Pagination
-              page={meta.page}
-              totalPages={meta.totalPages}
-              total={meta.total}
-              pageSize={meta.pageSize}
-              onPage={setPage}
-            />
+            <Pagination page={meta.page} totalPages={meta.totalPages} total={meta.total} pageSize={meta.pageSize} onPage={setPage} />
           </div>
         </div>
       )}
 
-      {/* Create / Edit Modal */}
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -301,7 +256,7 @@ export function ProductsPage() {
       >
         <div className="space-y-4">
           {formError && (
-            <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700" role="alert">
+            <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-3 py-2 text-sm text-red-700 dark:text-red-300" role="alert">
               {formError}
             </div>
           )}
@@ -315,12 +270,13 @@ export function ProductsPage() {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="label" htmlFor="prod-price">Price (£) <span aria-hidden="true">*</span></label>
-              <input id="prod-price" className="input" type="number" min="0" step="0.01" value={form.price_pounds} onChange={(e) => setForm({ ...form, price_pounds: e.target.value })} required />
+              <label className="label" htmlFor="prod-price">Price <span aria-hidden="true">*</span></label>
+              <input id="prod-price" className="input" type="number" min="0" step="0.01" value={form.price_major} onChange={(e) => setForm({ ...form, price_major: e.target.value })} required />
             </div>
             <div>
               <label className="label" htmlFor="prod-currency">Currency</label>
               <select id="prod-currency" className="input" value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
+                <option value="NGN">NGN</option>
                 <option value="GBP">GBP</option>
                 <option value="USD">USD</option>
                 <option value="EUR">EUR</option>
@@ -356,7 +312,6 @@ export function ProductsPage() {
         </div>
       </Modal>
 
-      {/* Archive confirm modal */}
       <Modal
         open={archiveTarget !== null}
         onClose={() => setArchiveTarget(null)}
@@ -370,7 +325,7 @@ export function ProductsPage() {
           </>
         }
       >
-        <p className="text-sm text-slate-700">
+        <p className="text-sm text-slate-700 dark:text-slate-300">
           Archive <strong>{archiveTarget?.name}</strong>? It will be hidden from your catalogue but not deleted.
           You can restore it by editing and changing the status back to active.
         </p>

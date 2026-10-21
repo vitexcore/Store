@@ -1,20 +1,9 @@
-/**
- * Transactions — read-only paginated list of payment records.
- * Simulated payments only — no real funds are transferred.
- */
-
 import { useState, useEffect, useCallback } from 'react';
 import { api, type TransactionRow } from '../lib/api.js';
 import { StatusBadge } from '../components/ui/StatusBadge.js';
 import { Pagination } from '../components/ui/Pagination.js';
 import { EmptyState, LoadingSpinner } from '../components/ui/EmptyState.js';
-
-function formatCurrency(cents: number, currency = 'GBP') {
-  return new Intl.NumberFormat('en-GB', { style: 'currency', currency }).format(cents / 100);
-}
-function formatDate(iso: string) {
-  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
-}
+import { formatCurrency, formatDateTime } from '../lib/currency.js';
 
 export function TransactionsPage() {
   const [transactions, setTransactions] = useState<TransactionRow[]>([]);
@@ -41,15 +30,15 @@ export function TransactionsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-slate-900">Transactions</h2>
-        <p className="mt-1 text-sm text-slate-500">
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Transactions</h2>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
           Payment records for your store.{' '}
-          <span className="font-medium text-amber-700">All payments are simulated — no real funds are transferred.</span>
+          <span className="font-medium text-amber-700 dark:text-amber-400">All payments are simulated — no real funds are transferred.</span>
         </p>
       </div>
 
       {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700" role="alert">
+        <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-300" role="alert">
           {error}
         </div>
       )}
@@ -61,7 +50,7 @@ export function TransactionsPage() {
           title="No transactions yet"
           description="Payment records will appear here after customers complete QR checkout flows."
           icon={
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-10 w-10 text-slate-300">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-10 w-10 text-slate-300 dark:text-slate-600">
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
             </svg>
           }
@@ -73,27 +62,27 @@ export function TransactionsPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border bg-surface-subtle">
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500">Order ref</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500">Payment status</th>
-                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wide text-slate-500">Amount</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500">Created</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500">Paid at</th>
+                <tr className="border-b border-border dark:border-slate-700 bg-surface-subtle dark:bg-slate-900/50">
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Order ref</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Payment status</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Amount</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Created</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Paid at</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border">
+              <tbody className="divide-y divide-border dark:divide-slate-700">
                 {transactions.map((t) => (
-                  <tr key={t.id} className="hover:bg-surface-subtle transition-colors">
-                    <td className="px-6 py-3 font-mono text-xs text-slate-700">{t.order_reference}</td>
+                  <tr key={t.id} className="hover:bg-surface-subtle dark:hover:bg-slate-700/40 transition-colors">
+                    <td className="px-6 py-3 font-mono text-xs text-slate-700 dark:text-slate-300">{t.order_reference}</td>
                     <td className="px-6 py-3">
                       <StatusBadge status={t.status as Parameters<typeof StatusBadge>[0]['status']} />
                     </td>
-                    <td className="px-6 py-3 text-right font-medium text-slate-900">
+                    <td className="px-6 py-3 text-right font-medium text-slate-900 dark:text-slate-100">
                       {formatCurrency(t.amount_cents, t.currency)}
                     </td>
-                    <td className="px-6 py-3 text-slate-500 text-xs">{formatDate(t.created_at)}</td>
-                    <td className="px-6 py-3 text-slate-500 text-xs">
-                      {t.paid_at ? formatDate(t.paid_at) : <span className="text-slate-300">—</span>}
+                    <td className="px-6 py-3 text-slate-500 dark:text-slate-400 text-xs">{formatDateTime(t.created_at)}</td>
+                    <td className="px-6 py-3 text-slate-500 dark:text-slate-400 text-xs">
+                      {t.paid_at ? formatDateTime(t.paid_at) : <span className="text-slate-300 dark:text-slate-600">—</span>}
                     </td>
                   </tr>
                 ))}

@@ -141,7 +141,7 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
       input.name.trim(),
       (input.description ?? '').trim().slice(0, 2000),
       input.priceCents,
-      input.currency ?? 'GBP',
+      input.currency ?? 'NGN',
       input.status ?? 'draft',
       input.imageUrl ?? null,
       input.stockQuantity ?? 0,

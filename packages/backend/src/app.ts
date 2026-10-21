@@ -26,6 +26,7 @@ import { config } from './config.js';
 import { healthRouter } from './routes/health.js';
 import { apiRouter } from './routes/api.js';
 import { authRouter } from './routes/auth.js';
+import { checkoutRouter, storefrontRouter, webhookRouter } from './routes/checkout.js';
 import { sessionMiddleware } from './auth/session.js';
 import { doubleCsrfProtection, generateCsrfToken } from './auth/csrf.js';
 import type { ApiError, ApiSuccess } from '@store/shared';
@@ -97,6 +98,11 @@ export function createApp(): express.Application {
   // -------------------------------------------------------------------------
   // Body parsing with size limits (prevents large payload attacks)
   // -------------------------------------------------------------------------
+
+  // Raw body for Paystack webhook — MUST be registered BEFORE express.json()
+  // so that the signature can be verified against the unmodified raw bytes.
+  app.use('/api/webhooks/paystack', express.raw({ type: 'application/json', limit: '100kb' }));
+
   app.use(express.json({ limit: '100kb' }));
   app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
@@ -122,6 +128,13 @@ export function createApp(): express.Application {
   app.use(sessionMiddleware());
 
   // -------------------------------------------------------------------------
+  // Paystack webhook — registered BEFORE CSRF middleware.
+  // Paystack uses its own HMAC-SHA512 signature verification; no CSRF token.
+  // Raw body is already set up above for this path.
+  // -------------------------------------------------------------------------
+  app.use('/api/webhooks', webhookRouter);
+
+  // -------------------------------------------------------------------------
   // CSRF protection — double-submit cookie pattern via csrf-csrf library.
   //
   // The CSRF token endpoint must come BEFORE doubleCsrfProtection so that
@@ -145,6 +158,14 @@ export function createApp(): express.Application {
   // -------------------------------------------------------------------------
   app.use('/health', healthRouter);
   app.use('/api/auth', authRouter);
+
+  // Public checkout/storefront routes MUST come before apiRouter.
+  // apiRouter has global requireAuth middleware that would block these public endpoints
+  // if they were caught by apiRouter's /api/* mount.
+  app.use('/api/checkout', checkoutRouter);
+  app.use('/api/storefront', storefrontRouter);
+
+  // Protected merchant API routes — requireAuth is applied globally inside apiRouter
   app.use('/api', apiRouter);
 
   // -------------------------------------------------------------------------

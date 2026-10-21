@@ -19,11 +19,14 @@ vi.mock('../lib/api.js', () => ({
     dashboard: {
       get: vi.fn().mockResolvedValue({ ok: false, code: 'NETWORK_ERROR', message: 'No server in test' }),
     },
+    store: {
+      get: vi.fn().mockResolvedValue({ ok: false, code: 'NETWORK_ERROR', message: 'No server in test' }),
+    },
   },
 }));
-// Mock useAuth so DashboardPage can render without an AuthProvider
+// Mock useAuth so DashboardPage and CheckoutPage can render without an AuthProvider
 vi.mock('../lib/auth.js', () => ({
-  useAuth: () => ({ user: { storeName: 'Test Store' } }),
+  useAuth: () => ({ user: { storeName: 'Test Store', storeSlug: 'test-store' } }),
 }));
 
 function Wrapper({ children }: { children: React.ReactNode }) {
@@ -45,12 +48,12 @@ describe('DashboardPage', () => {
 describe('CheckoutPage', () => {
   it('renders the page heading', () => {
     render(<CheckoutPage />, { wrapper: Wrapper });
-    expect(screen.getByRole('heading', { name: /qr checkout/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'QR Checkout' })).toBeInTheDocument();
   });
 
-  it('shows the simulated payment disclaimer', () => {
+  it('shows the payment disclaimer', () => {
     render(<CheckoutPage />, { wrapper: Wrapper });
-    expect(screen.getByText(/simulated payments only/i)).toBeInTheDocument();
+    expect(screen.getByText(/paystack test mode/i)).toBeInTheDocument();
   });
 });
 

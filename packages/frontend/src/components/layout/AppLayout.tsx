@@ -8,7 +8,7 @@ export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-surface-subtle">
+    <div className="flex h-screen overflow-hidden bg-surface-subtle dark:bg-slate-950">
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -18,7 +18,6 @@ export function AppLayout() {
           title={APP_NAME}
         />
 
-        {/* Skip-to-content link for keyboard users */}
         <a
           href="#main-content"
           className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:px-4 focus:py-2 focus:bg-brand-600 focus:text-white focus:top-0 focus:left-0"

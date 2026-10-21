@@ -18,6 +18,11 @@ import type {
   DashboardMetrics,
   PaginatedData,
   InventoryAdjustment,
+  CheckoutRequest,
+  CheckoutResponse,
+  PaymentStatusResponse,
+  StorefrontProduct,
+  StorefrontInfo,
 } from '@store/shared';
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? '';
@@ -202,5 +207,39 @@ export const api = {
       const qs = q.toString();
       return apiFetch<{ items: TransactionRow[]; meta: { page: number; pageSize: number; total: number; totalPages: number } }>(`/api/transactions${qs ? `?${qs}` : ''}`);
     },
+  },
+
+  storefront: {
+    getStore: (storeSlug: string) =>
+      apiFetch<StorefrontInfo>(`/api/storefront/${encodeURIComponent(storeSlug)}`),
+    getProducts: (storeSlug: string, params: { page?: number; pageSize?: number } = {}) => {
+      const q = new URLSearchParams();
+      if (params.page) q.set('page', String(params.page));
+      if (params.pageSize) q.set('pageSize', String(params.pageSize));
+      const qs = q.toString();
+      return apiFetch<{
+        store: StorefrontInfo;
+        products: StorefrontProduct[];
+        meta: { page: number; pageSize: number; total: number; totalPages: number };
+      }>(`/api/storefront/${encodeURIComponent(storeSlug)}/products${qs ? `?${qs}` : ''}`);
+    },
+  },
+
+  checkout: {
+    /** Create an order from the cart. Requires merchant auth + CSRF. */
+    createOrder: (data: CheckoutRequest) =>
+      apiFetch<CheckoutResponse>('/api/checkout/cart', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    /** Initialize Paystack for an existing payment token. Requires merchant auth + CSRF. */
+    initializePaystack: (paymentToken: string) =>
+      apiFetch<{ authorizationUrl: string; reference: string }>('/api/checkout/paystack/initialize', {
+        method: 'POST',
+        body: JSON.stringify({ paymentToken }),
+      }),
+    /** Get payment status by opaque token. Public — no auth required. */
+    getPaymentStatus: (token: string) =>
+      apiFetch<PaymentStatusResponse>(`/api/checkout/status/${encodeURIComponent(token)}`),
   },
 };

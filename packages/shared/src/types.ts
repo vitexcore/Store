@@ -174,3 +174,90 @@ export interface Transaction {
   paidAt: string | null;
   createdAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// Cart (client-side state — NEVER trusted for pricing on the backend)
+// ---------------------------------------------------------------------------
+
+/** A single item in the customer cart. Quantities only — prices are resolved server-side. */
+export interface CartItem {
+  productId: string;
+  quantity: number;
+  /** Display snapshot only — not sent to backend for total calculation. */
+  name: string;
+  /** Display snapshot only — authoritative price is fetched from DB on order creation. */
+  priceCents: number;
+  currency: string;
+  imageUrl: string | null;
+  maxStock: number;
+}
+
+// ---------------------------------------------------------------------------
+// Checkout request/response
+// ---------------------------------------------------------------------------
+
+/** Payload sent to POST /api/checkout/cart */
+export interface CheckoutRequest {
+  /** Opaque idempotency key (UUID v4 generated client-side) */
+  idempotencyKey: string;
+  /** Store slug — validated server-side */
+  storeSlug: string;
+  /** Items: only productId + quantity; pricing is server-side */
+  items: Array<{ productId: string; quantity: number }>;
+  customerName?: string;
+  customerEmail?: string;
+}
+
+/** Response from POST /api/checkout/cart */
+export interface CheckoutResponse {
+  orderId: string;
+  orderReference: string;
+  /** Opaque payment token — used to poll status and build QR payload */
+  paymentToken: string;
+  amountCents: number;
+  currency: string;
+  expiresAt: string;
+}
+
+/** Response from GET /api/checkout/status/:token (public, no auth required) */
+export interface PaymentStatusResponse {
+  paymentToken: string;
+  status: PaymentStatus;
+  amountCents: number;
+  currency: string;
+  orderReference: string;
+  storeName: string;
+  expiresAt: string | null;
+  paidAt: string | null;
+  /** Authorization URL from Paystack (safe to share; only used to redirect to provider) */
+  paystackAuthorizationUrl: string | null;
+}
+
+/** Response from POST /api/checkout/paystack/initialize */
+export interface PaystackInitializeResponse {
+  authorizationUrl: string;
+  reference: string;
+}
+
+// ---------------------------------------------------------------------------
+// Storefront product (public — subset of Product, no internal fields)
+// ---------------------------------------------------------------------------
+
+export interface StorefrontProduct {
+  id: string;
+  name: string;
+  description: string;
+  priceCents: number;
+  currency: string;
+  imageUrl: string | null;
+  stockQuantity: number;
+  /** True if product is active and in stock */
+  available: boolean;
+}
+
+export interface StorefrontInfo {
+  name: string;
+  slug: string;
+  description: string | null;
+  defaultCurrency: string;
+}

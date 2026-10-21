@@ -1,22 +1,11 @@
-/**
- * Dashboard — real metrics from the backend + recent orders + quick actions.
- */
-
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.js';
 import { StatusBadge } from '../components/ui/StatusBadge.js';
 import { LoadingSpinner } from '../components/ui/EmptyState.js';
+import { formatCurrency, formatDate } from '../lib/currency.js';
 import type { DashboardMetrics } from '@store/shared';
-
-function formatCurrency(cents: number, currency = 'GBP'): string {
-  return new Intl.NumberFormat('en-GB', { style: 'currency', currency }).format(cents / 100);
-}
-
-function formatDate(iso: string): string {
-  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(iso));
-}
 
 export function DashboardPage() {
   const { user } = useAuth();
@@ -38,10 +27,9 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* Page header */}
       <div>
-        <h2 className="text-xl font-semibold text-slate-900">Dashboard</h2>
-        <p className="mt-1 text-sm text-slate-500">
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Dashboard</h2>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
           Welcome back{user?.storeName ? `, ${user.storeName}` : ''}. Here's your store overview.
         </p>
       </div>
@@ -49,14 +37,13 @@ export function DashboardPage() {
       {loading && <LoadingSpinner label="Loading dashboard…" />}
 
       {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700" role="alert">
+        <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-4 py-3 text-sm text-red-700 dark:text-red-300" role="alert">
           {error}
         </div>
       )}
 
       {!loading && metrics && (
         <>
-          {/* Metric cards */}
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               label="Total Revenue"
@@ -85,58 +72,41 @@ export function DashboardPage() {
             />
           </div>
 
-          {/* Quick actions */}
           <div className="grid gap-4 sm:grid-cols-3">
-            <QuickAction
-              href="/products"
-              label="Manage Products"
-              description="Add, edit, or archive products"
-              icon={<ProductIcon />}
-            />
-            <QuickAction
-              href="/orders"
-              label="View Orders"
-              description="Track customer orders"
-              icon={<OrderIcon />}
-            />
-            <QuickAction
-              href="/settings"
-              label="Store Settings"
-              description="Update your store profile"
-              icon={<SettingsIcon />}
-            />
+            <QuickAction href="/products" label="Manage Products" description="Add, edit, or archive products" icon={<ProductIcon />} />
+            <QuickAction href="/orders" label="View Orders" description="Track customer orders" icon={<OrderIcon />} />
+            <QuickAction href="/settings" label="Store Settings" description="Update your store profile" icon={<SettingsIcon />} />
           </div>
 
-          {/* Recent orders */}
           <div className="card p-0 overflow-hidden">
-            <div className="px-6 py-4 border-b border-border">
-              <h3 className="text-sm font-semibold text-slate-900">Recent Orders</h3>
+            <div className="px-6 py-4 border-b border-border dark:border-slate-700">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Recent Orders</h3>
             </div>
             {metrics.recentOrders.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-center gap-2">
-                <p className="text-sm text-slate-500">No orders yet</p>
-                <p className="text-xs text-slate-400">Orders will appear here once customers place them via QR checkout.</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">No orders yet</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500">Orders will appear here once customers place them via QR checkout.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-border bg-surface-subtle">
-                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500">Reference</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500">Customer</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500">Status</th>
-                      <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wide text-slate-500">Total</th>
-                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500">Date</th>
+                    <tr className="border-b border-border dark:border-slate-700 bg-surface-subtle dark:bg-slate-900/50">
+                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Reference</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Customer</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Status</th>
+                      <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Total</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Date</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border">
+                  <tbody className="divide-y divide-border dark:divide-slate-700">
                     {metrics.recentOrders.map((order) => (
-                      <tr key={order.id} className="hover:bg-surface-subtle transition-colors">
-                        <td className="px-6 py-3 font-mono text-xs text-slate-700">{order.reference}</td>
-                        <td className="px-6 py-3 text-slate-600">{order.customerName ?? <span className="text-slate-400">—</span>}</td>
+                      <tr key={order.id} className="hover:bg-surface-subtle dark:hover:bg-slate-700/40 transition-colors">
+                        <td className="px-6 py-3 font-mono text-xs text-slate-700 dark:text-slate-300">{order.reference}</td>
+                        <td className="px-6 py-3 text-slate-600 dark:text-slate-300">{order.customerName ?? <span className="text-slate-400">—</span>}</td>
                         <td className="px-6 py-3"><StatusBadge status={order.status} /></td>
-                        <td className="px-6 py-3 text-right font-medium text-slate-900">{formatCurrency(order.totalCents, order.currency)}</td>
-                        <td className="px-6 py-3 text-slate-500">{formatDate(order.createdAt)}</td>
+                        <td className="px-6 py-3 text-right font-medium text-slate-900 dark:text-slate-100">{formatCurrency(order.totalCents, order.currency)}</td>
+                        <td className="px-6 py-3 text-slate-500 dark:text-slate-400">{formatDate(order.createdAt)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -144,8 +114,8 @@ export function DashboardPage() {
               </div>
             )}
             {metrics.recentOrders.length > 0 && (
-              <div className="px-6 py-3 border-t border-border">
-                <Link to="/orders" className="text-sm font-medium text-brand-600 hover:text-brand-700">
+              <div className="px-6 py-3 border-t border-border dark:border-slate-700">
+                <Link to="/orders" className="text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300">
                   View all orders →
                 </Link>
               </div>
@@ -157,21 +127,20 @@ export function DashboardPage() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------------------
-
 function MetricCard({ label, value, note, icon, highlight }: {
   label: string; value: string; note: string; icon: React.ReactNode; highlight?: boolean;
 }) {
   return (
-    <div className={`card ${highlight ? 'border-amber-200 bg-amber-50' : ''}`} aria-label={`${label}: ${value}`}>
+    <div
+      className={`card ${highlight ? 'border-amber-200 bg-amber-50 dark:border-amber-800/50 dark:bg-amber-900/20' : ''}`}
+      aria-label={`${label}: ${value}`}
+    >
       <div className="flex items-start justify-between">
-        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
-        <span className={`${highlight ? 'text-amber-600' : 'text-brand-600'}`}>{icon}</span>
+        <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
+        <span className={highlight ? 'text-amber-600 dark:text-amber-400' : 'text-brand-600 dark:text-brand-400'}>{icon}</span>
       </div>
-      <p className={`mt-2 text-3xl font-bold ${highlight ? 'text-amber-700' : 'text-slate-900'}`}>{value}</p>
-      <p className="mt-1 text-xs text-slate-400">{note}</p>
+      <p className={`mt-2 text-3xl font-bold ${highlight ? 'text-amber-700 dark:text-amber-300' : 'text-slate-900 dark:text-slate-100'}`}>{value}</p>
+      <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">{note}</p>
     </div>
   );
 }
@@ -180,22 +149,18 @@ function QuickAction({ href, label, description, icon }: {
   href: string; label: string; description: string; icon: React.ReactNode;
 }) {
   return (
-    <Link
-      to={href}
-      className="card hover:shadow-card-hover transition-shadow flex items-start gap-3 group"
-    >
-      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-100 text-brand-600 group-hover:bg-brand-600 group-hover:text-white transition-colors shrink-0">
+    <Link to={href} className="card hover:shadow-card-hover transition-shadow flex items-start gap-3 group">
+      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-100 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400 group-hover:bg-brand-600 group-hover:text-white dark:group-hover:bg-brand-600 transition-colors shrink-0">
         {icon}
       </span>
       <div>
-        <p className="text-sm font-semibold text-slate-900">{label}</p>
-        <p className="text-xs text-slate-500 mt-0.5">{description}</p>
+        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{label}</p>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{description}</p>
       </div>
     </Link>
   );
 }
 
-// Simple inline SVG icons
 function RevenueIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-5 w-5">
