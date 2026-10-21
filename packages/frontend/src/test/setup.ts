@@ -1,7 +1,23 @@
 import '@testing-library/jest-dom';
 
+// jsdom does not implement window.matchMedia. Provide a minimal stub so that
+// ThemeProvider (which calls matchMedia for OS dark-mode preference detection)
+// does not throw in tests. Individual tests can override this stub.
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  }),
+});
+
 // Suppress React Router v6 → v7 future flag warnings in test output.
-// These are informational deprecation notices, not test failures.
 const originalWarn = console.warn.bind(console);
 beforeAll(() => {
   console.warn = (msg: unknown, ...args: unknown[]) => {
