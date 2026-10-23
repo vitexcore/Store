@@ -135,9 +135,6 @@ export function RegisterPage() {
           </p>
         </div>
 
-        <p className="mt-4 text-center text-xs text-slate-400 dark:text-slate-500">
-          Demo application. Payments are simulated and do not transfer real funds.
-        </p>
       </div>
     </div>
   );

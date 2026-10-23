@@ -6,10 +6,9 @@ import { ThemeToggle } from '../ui/ThemeToggle.tsx';
 interface TopbarProps {
   onMenuClick: () => void;
   sidebarOpen: boolean;
-  title: string;
 }
 
-export function Topbar({ onMenuClick, sidebarOpen, title }: TopbarProps) {
+export function Topbar({ onMenuClick, sidebarOpen }: TopbarProps) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -48,14 +47,7 @@ export function Topbar({ onMenuClick, sidebarOpen, title }: TopbarProps) {
         </svg>
       </button>
 
-      <h1 className="text-base font-semibold text-slate-900 dark:text-slate-100">{title}</h1>
-
       <div className="ml-auto flex items-center gap-2">
-        <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-amber-100 dark:bg-amber-900/40 px-2.5 py-1 text-xs font-medium text-amber-800 dark:text-amber-300">
-          <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
-          Demo
-        </span>
-
         <ThemeToggle />
 
         <div className="relative" ref={menuRef}>

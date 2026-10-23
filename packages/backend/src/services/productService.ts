@@ -3,7 +3,7 @@
  * All queries are store-scoped and parameterized.
  */
 
-import { query } from '../db/pool.js';
+import { getClient, query } from '../db/pool.js';
 import type { Product, ProductStatus, PaginatedData } from '@store/shared';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '@store/shared';
 
@@ -120,6 +120,7 @@ export async function getProduct(productId: string): Promise<Product | null> {
 // ---------------------------------------------------------------------------
 export interface CreateProductInput {
   storeId: string;
+  idempotencyKey?: string;
   name: string;
   description?: string;
   priceCents: number;
@@ -130,25 +131,52 @@ export interface CreateProductInput {
   lowStockThreshold?: number;
 }
 
-export async function createProduct(input: CreateProductInput): Promise<Product> {
+export interface CreateProductResult {
+  product: Product;
+  created: boolean;
+}
+
+export async function createProduct(input: CreateProductInput): Promise<CreateProductResult> {
+  const values = [
+    input.storeId,
+    input.name.trim(),
+    (input.description ?? '').trim().slice(0, 2000),
+    input.priceCents,
+    input.currency ?? 'NGN',
+    input.status ?? 'draft',
+    input.imageUrl ?? null,
+    input.stockQuantity ?? 0,
+    input.lowStockThreshold ?? 5,
+  ];
+
+  if (input.idempotencyKey) {
+    const result = await query<ProductRow>(
+      `INSERT INTO products
+         (store_id, name, description, price_cents, currency, status, image_url, stock_quantity, low_stock_threshold, create_idempotency_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (store_id, create_idempotency_key) WHERE create_idempotency_key IS NOT NULL DO NOTHING
+       RETURNING ${PRODUCT_COLUMNS}`,
+      [...values, input.idempotencyKey],
+    );
+    if (result.rows[0]) return { product: rowToProduct(result.rows[0]), created: true };
+
+    // A retry with the same key returns the original product instead of inserting a duplicate.
+    const existing = await query<ProductRow>(
+      `SELECT ${PRODUCT_COLUMNS} FROM products WHERE store_id = $1 AND create_idempotency_key = $2`,
+      [input.storeId, input.idempotencyKey],
+    );
+    if (existing.rows[0]) return { product: rowToProduct(existing.rows[0]), created: false };
+    throw new Error('Product idempotency record could not be loaded after conflict.');
+  }
+
   const result = await query<ProductRow>(
     `INSERT INTO products
        (store_id, name, description, price_cents, currency, status, image_url, stock_quantity, low_stock_threshold)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING ${PRODUCT_COLUMNS}`,
-    [
-      input.storeId,
-      input.name.trim(),
-      (input.description ?? '').trim().slice(0, 2000),
-      input.priceCents,
-      input.currency ?? 'NGN',
-      input.status ?? 'draft',
-      input.imageUrl ?? null,
-      input.stockQuantity ?? 0,
-      input.lowStockThreshold ?? 5,
-    ],
+    values,
   );
-  return rowToProduct(result.rows[0]!);
+  return { product: rowToProduct(result.rows[0]!), created: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -202,4 +230,44 @@ export async function archiveProduct(productId: string): Promise<Product | null>
   if (result.rows[0]) return rowToProduct(result.rows[0]);
   // Already archived or not found — return current state
   return getProduct(productId);
+}
+
+// ---------------------------------------------------------------------------
+// Permanently delete a product only when inventory history can be preserved
+// ---------------------------------------------------------------------------
+export type DeleteProductResult = 'deleted' | 'not_found' | 'has_inventory_records';
+
+export async function deleteProduct(productId: string, storeId: string): Promise<DeleteProductResult> {
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+
+    // Serialize deletion with inventory adjustments, which lock this same row.
+    const product = await client.query<{ id: string; stock_quantity: number }>(
+      'SELECT id, stock_quantity FROM products WHERE id = $1 AND store_id = $2 FOR UPDATE',
+      [productId, storeId],
+    );
+    if (product.rowCount === 0) {
+      await client.query('COMMIT');
+      return 'not_found';
+    }
+
+    const history = await client.query<{ has_history: boolean }>(
+      'SELECT EXISTS (SELECT 1 FROM inventory_adjustments WHERE product_id = $1) AS has_history',
+      [productId],
+    );
+    if ((product.rows[0]?.stock_quantity ?? 0) > 0 || history.rows[0]?.has_history) {
+      await client.query('COMMIT');
+      return 'has_inventory_records';
+    }
+
+    await client.query('DELETE FROM products WHERE id = $1 AND store_id = $2', [productId, storeId]);
+    await client.query('COMMIT');
+    return 'deleted';
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }

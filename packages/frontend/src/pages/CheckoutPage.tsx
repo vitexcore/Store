@@ -27,17 +27,6 @@ export function CheckoutPage() {
         </p>
       </div>
 
-      <div className="rounded-lg border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-900/20 p-4 flex gap-3">
-        <AlertIcon className="h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
-        <div>
-          <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Demo mode — Paystack test mode only</p>
-          <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
-            Payments use Paystack sandbox/test mode and do not transfer real funds.
-            Set <code className="font-mono bg-amber-100 dark:bg-amber-900/40 px-0.5 rounded">PAYSTACK_SECRET_KEY=sk_test_...</code> to enable test payments.
-          </p>
-        </div>
-      </div>
-
       <div className="card">
         <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">Your Store Link</h3>
         {storefrontUrl ? (
@@ -108,13 +97,5 @@ export function CheckoutPage() {
         </p>
       </div>
     </div>
-  );
-}
-
-function AlertIcon({ className }: { className?: string }) {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-    </svg>
   );
 }

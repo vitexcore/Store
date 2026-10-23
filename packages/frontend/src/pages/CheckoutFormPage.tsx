@@ -96,7 +96,7 @@ export function CheckoutFormPage() {
         <div className="rounded-lg border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 flex gap-3 items-start">
           <AlertIcon className="h-5 w-5 flex-shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
           <p className="text-sm text-amber-800 dark:text-amber-300">
-            <strong>Demo mode</strong> — Paystack test mode. No real funds will be transferred.
+            <strong>Paystack test mode.</strong> No real funds will be transferred.
           </p>
         </div>
 

@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar.tsx';
 import { Topbar } from './Topbar.tsx';
-import { APP_NAME } from '@store/shared';
 
 export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -15,7 +14,6 @@ export function AppLayout() {
         <Topbar
           onMenuClick={() => setSidebarOpen((prev) => !prev)}
           sidebarOpen={sidebarOpen}
-          title={APP_NAME}
         />
 
         <a

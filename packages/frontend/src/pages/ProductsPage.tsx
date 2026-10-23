@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { api } from '../lib/api.js';
 import { StatusBadge } from '../components/ui/StatusBadge.js';
 import { Pagination } from '../components/ui/Pagination.js';
@@ -64,9 +65,14 @@ export function ProductsPage() {
   const [form, setForm] = useState<ProductFormData>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const createRequestRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const [archiveTarget, setArchiveTarget] = useState<Product | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -88,6 +94,7 @@ export function ProductsPage() {
     setEditingProduct(null);
     setForm(EMPTY_FORM);
     setFormError(null);
+    createRequestRef.current = null;
     setModalOpen(true);
   }
 
@@ -99,6 +106,7 @@ export function ProductsPage() {
   }
 
   async function handleSave() {
+    if (savingRef.current) return;
     setFormError(null);
     const priceCents = Math.round(parseFloat(form.price_major) * 100);
     if (!form.name.trim()) { setFormError('Product name is required.'); return; }
@@ -109,32 +117,50 @@ export function ProductsPage() {
     if (isNaN(threshold) || threshold < 0) { setFormError('Low stock threshold must be 0 or more.'); return; }
 
     setSaving(true);
+    savingRef.current = true;
     let res;
-    if (editingProduct) {
-      res = await api.products.update(editingProduct.id, {
-        name: form.name.trim(),
-        description: form.description,
-        price_cents: priceCents,
-        currency: form.currency,
-        status: form.status,
-        low_stock_threshold: threshold,
-      });
-    } else {
-      res = await api.products.create({
-        name: form.name.trim(),
-        description: form.description,
-        price_cents: priceCents,
-        currency: form.currency,
-        status: form.status,
-        stock_quantity: stockQty,
-        low_stock_threshold: threshold,
-      });
+    try {
+      if (editingProduct) {
+        res = await api.products.update(editingProduct.id, {
+          name: form.name.trim(),
+          description: form.description,
+          price_cents: priceCents,
+          currency: form.currency,
+          status: form.status,
+          low_stock_threshold: threshold,
+        });
+      } else {
+        const payload = {
+          name: form.name.trim(),
+          description: form.description,
+          price_cents: priceCents,
+          currency: form.currency,
+          status: form.status,
+          stock_quantity: stockQty,
+          low_stock_threshold: threshold,
+        };
+        const fingerprint = JSON.stringify(payload);
+        const previous = createRequestRef.current;
+        const idempotencyKey = previous?.fingerprint === fingerprint ? previous.key : uuidv4();
+        createRequestRef.current = { fingerprint, key: idempotencyKey };
+        res = await api.products.create({ ...payload, idempotency_key: idempotencyKey });
+      }
+    } catch {
+      setFormError('Could not reach the server. Your request may still have been saved; retrying will not create a duplicate.');
+      return;
+    } finally {
+      setSaving(false);
+      savingRef.current = false;
     }
-    setSaving(false);
 
     if (res.ok) {
+      if (!editingProduct) createRequestRef.current = null;
       setModalOpen(false);
       load();
+    } else if (!editingProduct && res.code === 'NETWORK_ERROR') {
+      setFormError('We could not confirm whether the product was saved. Retry with this form open; duplicate prevention is enabled.');
+    } else if (res.code === 'CSRF_ERROR' || res.code === 'CSRF_TOKEN_UNAVAILABLE') {
+      setFormError('The security check could not be completed. No product was created; please try again.');
     } else {
       setFormError(res.message);
     }
@@ -147,6 +173,20 @@ export function ProductsPage() {
     setArchiving(false);
     setArchiveTarget(null);
     if (res.ok) load();
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    const res = await api.products.remove(deleteTarget.id);
+    setDeleting(false);
+    if (res.ok) {
+      setDeleteTarget(null);
+      load();
+    } else {
+      setDeleteError(res.message);
+    }
   }
 
   return (
@@ -227,6 +267,14 @@ export function ProductsPage() {
                               Archive
                             </button>
                           )}
+                          <button
+                            type="button"
+                            className="btn-ghost px-2 py-1 text-xs text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                            onClick={() => { setDeleteTarget(p); setDeleteError(null); }}
+                            aria-label={`Delete ${p.name}`}
+                          >
+                            Delete
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -328,6 +376,29 @@ export function ProductsPage() {
         <p className="text-sm text-slate-700 dark:text-slate-300">
           Archive <strong>{archiveTarget?.name}</strong>? It will be hidden from your catalogue but not deleted.
           You can restore it by editing and changing the status back to active.
+        </p>
+      </Modal>
+
+      <Modal
+        open={deleteTarget !== null}
+        onClose={() => { if (!deleting) { setDeleteTarget(null); setDeleteError(null); } }}
+        title="Delete product"
+        footer={
+          <>
+            <button type="button" className="btn-secondary" onClick={() => { setDeleteTarget(null); setDeleteError(null); }} disabled={deleting}>Cancel</button>
+            <button type="button" className="btn-danger" onClick={handleDelete} disabled={deleting}>
+              {deleting ? 'Deleting…' : 'Delete permanently'}
+            </button>
+          </>
+        }
+      >
+        {deleteError && (
+          <div className="mb-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-3 py-2 text-sm text-red-700 dark:text-red-300" role="alert">
+            {deleteError}
+          </div>
+        )}
+        <p className="text-sm text-slate-700 dark:text-slate-300">
+          Permanently delete <strong>{deleteTarget?.name}</strong>? Existing order records keep their saved item details. Products with remaining stock or inventory adjustment history cannot be deleted; archive those products instead.
         </p>
       </Modal>
     </div>

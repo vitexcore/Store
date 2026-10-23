@@ -33,7 +33,7 @@ export function TransactionsPage() {
         <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Transactions</h2>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
           Payment records for your store.{' '}
-          <span className="font-medium text-amber-700 dark:text-amber-400">All payments are simulated — no real funds are transferred.</span>
+          <span className="font-medium text-amber-700 dark:text-amber-400">Payments use Paystack test mode; no real funds are transferred.</span>
         </p>
       </div>
 

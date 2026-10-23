@@ -1,14 +1,3 @@
-/**
- * API router — all protected /api/* routes.
- *
- * Every route requires authentication + store association via the middleware
- * applied at the top of this file. Identity comes from req.session, never
- * from client-supplied data.
- *
- * Business logic lives in src/services/. Route handlers validate inputs,
- * call services, and format responses.
- */
-
 import { Router, Request, Response, IRouter } from 'express';
 import type { ApiSuccess, ApiError, PaginatedData, ProductStatus } from '@store/shared';
 import { SUPPORTED_CURRENCIES, MAX_LENGTHS, DEFAULT_CURRENCY } from '@store/shared';
@@ -19,9 +8,10 @@ import {
 } from '../auth/middleware.js';
 import { query } from '../db/pool.js';
 import { getStore, updateStore } from '../services/storeService.js';
-import { listProducts, getProduct, createProduct, updateProduct, archiveProduct } from '../services/productService.js';
+import { listProducts, getProduct, createProduct, updateProduct, archiveProduct, deleteProduct } from '../services/productService.js';
 import { getInventorySummary, adjustStock } from '../services/inventoryService.js';
 import { getDashboardMetrics } from '../services/dashboardService.js';
+import { getSalesAnalytics, AnalyticsValidationError } from '../services/analyticsService.js';
 
 export const apiRouter: IRouter = Router();
 
@@ -51,6 +41,31 @@ apiRouter.get('/dashboard', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[dashboard] error:', err instanceof Error ? err.message : String(err));
     const body: ApiError = { ok: false, code: 'INTERNAL_ERROR', message: 'Failed to load dashboard metrics.' };
+    res.status(500).json(body);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Sales analytics
+// ---------------------------------------------------------------------------
+// The store is always taken from the authenticated session. A storeId query
+// parameter is ignored, so merchants cannot request another store's analytics.
+apiRouter.get('/analytics/sales', async (req: Request, res: Response) => {
+  try {
+    const analytics = await getSalesAnalytics(req.user!.storeId!, {
+      preset: req.query['preset'],
+      start: req.query['start'],
+      end: req.query['end'],
+    });
+    const body: ApiSuccess<typeof analytics> = { ok: true, data: analytics };
+    res.status(200).json(body);
+  } catch (err) {
+    if (err instanceof AnalyticsValidationError) {
+      const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: err.message };
+      return res.status(400).json(body);
+    }
+    console.error('[analytics] sales error:', err instanceof Error ? err.message : String(err));
+    const body: ApiError = { ok: false, code: 'INTERNAL_ERROR', message: 'Failed to load sales analytics.' };
     res.status(500).json(body);
   }
 });
@@ -152,7 +167,7 @@ apiRouter.get('/products', async (req: Request, res: Response) => {
 
 apiRouter.post('/products', async (req: Request, res: Response) => {
   const storeId = req.user!.storeId!;
-  const { name, description, price_cents, currency, status, image_url, stock_quantity, low_stock_threshold } = req.body;
+  const { name, description, price_cents, currency, status, image_url, stock_quantity, low_stock_threshold, idempotency_key } = req.body;
 
   if (!isNonEmptyString(name, MAX_LENGTHS.productName)) {
     const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: `Product name is required (max ${MAX_LENGTHS.productName} chars).` };
@@ -160,6 +175,10 @@ apiRouter.post('/products', async (req: Request, res: Response) => {
   }
   if (!isNonNegativeInt(price_cents)) {
     const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: 'price_cents must be a non-negative integer.' };
+    return res.status(400).json(body);
+  }
+  if (idempotency_key !== undefined && !isUuid(idempotency_key)) {
+    const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: 'idempotency_key must be a valid UUID.' };
     return res.status(400).json(body);
   }
   if (currency !== undefined && !ALLOWED_CURRENCIES.includes(currency)) {
@@ -180,8 +199,9 @@ apiRouter.post('/products', async (req: Request, res: Response) => {
   }
 
   try {
-    const product = await createProduct({
+    const result = await createProduct({
       storeId,
+      idempotencyKey: idempotency_key,
       name,
       description,
       priceCents: price_cents,
@@ -191,8 +211,8 @@ apiRouter.post('/products', async (req: Request, res: Response) => {
       stockQuantity: stock_quantity,
       lowStockThreshold: low_stock_threshold,
     });
-    const body: ApiSuccess<typeof product> = { ok: true, data: product };
-    res.status(201).json(body);
+    const body: ApiSuccess<typeof result.product> = { ok: true, data: result.product };
+    res.status(result.created ? 201 : 200).json(body);
   } catch (err) {
     console.error('[products] create error:', err instanceof Error ? err.message : String(err));
     const body: ApiError = { ok: false, code: 'INTERNAL_ERROR', message: 'Failed to create product.' };
@@ -366,9 +386,22 @@ apiRouter.delete('/products/:id', async (req: Request, res: Response) => {
     if (!checkStoreOwnership(existing.storeId, req.user?.storeId)) {
       return denyResourceAccess(res);
     }
-    await query('DELETE FROM products WHERE id = $1', [id]);
+
+    const result = await deleteProduct(id, req.user!.storeId!);
+    if (result === 'not_found') {
+      const body: ApiError = { ok: false, code: 'NOT_FOUND', message: 'Product not found.' };
+      return res.status(404).json(body);
+    }
+    if (result === 'has_inventory_records') {
+      const body: ApiError = {
+        ok: false,
+        code: 'PRODUCT_HAS_INVENTORY_RECORDS',
+        message: 'This product has stock or inventory history and cannot be permanently deleted. Archive it instead.',
+      };
+      return res.status(409).json(body);
+    }
     const body: ApiSuccess<null> = { ok: true, data: null };
-    res.status(204).json(body);
+    res.status(200).json(body);
   } catch (err) {
     console.error('[products] delete error:', err instanceof Error ? err.message : String(err));
     const body: ApiError = { ok: false, code: 'INTERNAL_ERROR', message: 'Failed to delete product.' };

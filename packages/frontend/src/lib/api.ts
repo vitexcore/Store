@@ -16,6 +16,7 @@ import type {
   Store,
   Product,
   DashboardMetrics,
+  SalesAnalytics,
   PaginatedData,
   InventoryAdjustment,
   CheckoutRequest,
@@ -31,24 +32,44 @@ const BASE_URL = import.meta.env.VITE_API_URL ?? '';
 // CSRF token management — fetched from server, stored in memory only
 // ---------------------------------------------------------------------------
 let csrfToken: string | null = null;
+let csrfTokenGeneration = 0;
+let csrfTokenRequest: { generation: number; promise: Promise<void> } | null = null;
 
-async function fetchCsrfToken(): Promise<void> {
-  if (csrfToken) return;
-  try {
-    const res = await fetch(`${BASE_URL}/api/auth/csrf-token`, { credentials: 'include' });
-    const data = (await res.json()) as ApiResponse<{ token: string }>;
-    if (data.ok) csrfToken = data.data.token;
-  } catch {
-    // Will retry on next state-changing request
+async function fetchCsrfToken(): Promise<string> {
+  while (!csrfToken) {
+    const generation = csrfTokenGeneration;
+    let pending = csrfTokenRequest?.generation === generation ? csrfTokenRequest : null;
+
+    if (!pending) {
+      const promise = (async () => {
+        const res = await fetch(`${BASE_URL}/api/auth/csrf-token`, { credentials: 'include' });
+        if (!res.ok) throw new Error('CSRF token request failed');
+        const data = (await res.json()) as ApiResponse<{ token: string }>;
+        if (!data.ok || typeof data.data?.token !== 'string' || data.data.token.length === 0) {
+          throw new Error('CSRF token response was invalid');
+        }
+        // A login/logout may invalidate the token while this request is in flight.
+        if (csrfTokenGeneration === generation) csrfToken = data.data.token;
+      })();
+      pending = { generation, promise };
+      csrfTokenRequest = pending;
+    }
+
+    try {
+      await pending.promise;
+    } catch (err) {
+      if (generation !== csrfTokenGeneration) continue;
+      throw err;
+    } finally {
+      if (csrfTokenRequest === pending) csrfTokenRequest = null;
+    }
   }
-}
-
-function getCsrfHeader(): Record<string, string> {
-  return csrfToken ? { 'x-csrf-token': csrfToken } : {};
+  return csrfToken;
 }
 
 export function resetCsrfToken(): void {
   csrfToken = null;
+  csrfTokenGeneration += 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -57,30 +78,60 @@ export function resetCsrfToken(): void {
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
   const method = (options.method ?? 'GET').toUpperCase();
   const isStateChanging = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+  let requestCsrfToken: string | null = null;
 
-  if (isStateChanging) await fetchCsrfToken();
-
-  try {
-    const response = await fetch(`${BASE_URL}${path}`, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(isStateChanging ? getCsrfHeader() : {}),
-        ...options.headers,
-      },
-      credentials: 'include',
-    });
-
-    const data = (await response.json()) as ApiResponse<T>;
-
-    if (!data.ok && (data as { code?: string }).code === 'CSRF_ERROR') {
-      resetCsrfToken();
+  if (isStateChanging) {
+    try {
+      requestCsrfToken = await fetchCsrfToken();
+    } catch {
+      return { ok: false, code: 'CSRF_TOKEN_UNAVAILABLE', message: 'Could not prepare a secure request. Check your connection and try again.' };
     }
-
-    return data;
-  } catch {
-    return { ok: false, code: 'NETWORK_ERROR', message: 'Could not reach the server. Please check your connection.' };
   }
+
+  const attempt = async (token: string | null): Promise<ApiResponse<T>> => {
+    try {
+      const response = await fetch(`${BASE_URL}${path}`, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(isStateChanging && token ? { 'x-csrf-token': token } : {}),
+          ...options.headers,
+        },
+        credentials: 'include',
+      });
+
+      const data = (await response.json()) as ApiResponse<T>;
+      return data;
+    } catch {
+      return { ok: false, code: 'NETWORK_ERROR', message: 'Could not reach the server. Please check your connection.' };
+    }
+  };
+
+  const result = await attempt(requestCsrfToken);
+
+  // If the server rejected the CSRF token, clear the stale cached value,
+  // fetch a fresh one, and retry exactly once. This handles the case where
+  // the cached token was fetched before a session regeneration (e.g. the
+  // page was held open across a login) and is now invalid.
+  if (!result.ok && (result as { code?: string }).code === 'CSRF_ERROR' && isStateChanging) {
+    resetCsrfToken();
+    try {
+      const refreshedToken = await fetchCsrfToken();
+      const retry = await attempt(refreshedToken);
+      if (!retry.ok && (retry as { code?: string }).code === 'CSRF_ERROR') {
+        return {
+          ok: false,
+          code: 'CSRF_ERROR',
+          message: 'We could not verify this request. No changes were made; please try again.',
+        };
+      }
+      return retry;
+    } catch {
+      return { ok: false, code: 'CSRF_TOKEN_UNAVAILABLE', message: 'Could not refresh the security token. Your changes were not saved; please try again.' };
+    }
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +202,17 @@ export const api = {
     get: () => apiFetch<DashboardMetrics>('/api/dashboard'),
   },
 
+  analytics: {
+    sales: (params: { preset?: 'today' | '7d' | '30d'; start?: string; end?: string } = {}) => {
+      const q = new URLSearchParams();
+      if (params.preset) q.set('preset', params.preset);
+      if (params.start) q.set('start', params.start);
+      if (params.end) q.set('end', params.end);
+      const qs = q.toString();
+      return apiFetch<SalesAnalytics>(`/api/analytics/sales${qs ? `?${qs}` : ''}`);
+    },
+  },
+
   products: {
     list: (params: { page?: number; pageSize?: number; search?: string; status?: string } = {}) => {
       const q = new URLSearchParams();
@@ -165,6 +227,7 @@ export const api = {
     create: (data: {
       name: string; description?: string; price_cents: number;
       currency?: string; status?: string; stock_quantity?: number; low_stock_threshold?: number;
+      idempotency_key?: string;
     }) => apiFetch<Product>('/api/products', { method: 'POST', body: JSON.stringify(data) }),
     update: (id: string, data: Partial<{
       name: string; description: string; price_cents: number;
@@ -172,6 +235,8 @@ export const api = {
     }>) => apiFetch<Product>(`/api/products/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     archive: (id: string) =>
       apiFetch<Product>(`/api/products/${id}/archive`, { method: 'PATCH', body: JSON.stringify({}) }),
+    remove: (id: string) =>
+      apiFetch<null>(`/api/products/${id}`, { method: 'DELETE' }),
   },
 
   inventory: {

@@ -60,6 +60,70 @@ export interface RecentOrderSummary {
   createdAt: string;
 }
 
+// ---------------------------------------------------------------------------
+// Sales analytics
+// ---------------------------------------------------------------------------
+
+export type SalesAnalyticsPreset = 'today' | '7d' | '30d' | 'custom';
+
+export interface SalesAnalyticsRange {
+  /** Inclusive first calendar day (YYYY-MM-DD) in the analytics timezone. */
+  start: string;
+  /** Inclusive last calendar day (YYYY-MM-DD) in the analytics timezone. */
+  end: string;
+  preset: SalesAnalyticsPreset;
+  /** IANA timezone used for every date boundary in this response. */
+  timezone: string;
+  /** Number of calendar days in the selected range. */
+  days: number;
+}
+
+export interface SalesAnalyticsComparison {
+  /** Inclusive first day of the immediately preceding equivalent period. */
+  start: string;
+  /** Inclusive last day of the immediately preceding equivalent period. */
+  end: string;
+  revenueCents: number;
+  completedOrderCount: number;
+  averageOrderValueCents: number;
+  revenueChangeCents: number;
+  /** Percentage change rounded to one decimal. Null means there is no prior baseline. */
+  revenueChangePercent: number | null;
+  orderCountChange: number;
+  /** Percentage change rounded to one decimal. Null means there is no prior baseline. */
+  orderCountChangePercent: number | null;
+}
+
+export interface SalesDailyPoint {
+  /** Calendar day (YYYY-MM-DD) in the analytics timezone. */
+  date: string;
+  revenueCents: number;
+  orderCount: number;
+}
+
+export interface SalesProductPerformance {
+  /** Null when the product record no longer exists; the name is the order snapshot. */
+  productId: string | null;
+  name: string;
+  quantitySold: number;
+  revenueCents: number;
+  orderCount: number;
+}
+
+export interface SalesAnalytics {
+  currency: string;
+  range: SalesAnalyticsRange;
+  comparison: SalesAnalyticsComparison;
+  revenueCents: number;
+  completedOrderCount: number;
+  averageOrderValueCents: number;
+  daily: SalesDailyPoint[];
+  topProducts: SalesProductPerformance[];
+  /** Lowest quantities sold among products that sold at least once in the range. */
+  slowestProducts: SalesProductPerformance[];
+  limitations: string[];
+}
+
 export interface User {
   id: string;
   email: string;

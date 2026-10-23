@@ -39,6 +39,20 @@ export function formatDate(iso: string): string {
 }
 
 /**
+ * Format a calendar date (YYYY-MM-DD) without shifting it across timezones.
+ * Analytics dates are already resolved in the store's analytics timezone, so
+ * they must not be reinterpreted in the browser's local timezone.
+ */
+export function formatDateOnly(date: string): string {
+  return new Intl.DateTimeFormat('en-NG', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(`${date}T00:00:00Z`));
+}
+
+/**
  * Format a date string with time for display.
  */
 export function formatDateTime(iso: string): string {

@@ -4,6 +4,7 @@ import { api } from '../lib/api.js';
 import { useAuth } from '../lib/auth.js';
 import { StatusBadge } from '../components/ui/StatusBadge.js';
 import { LoadingSpinner } from '../components/ui/EmptyState.js';
+import { SalesAnalyticsPanel } from '../components/analytics/SalesAnalyticsPanel.js';
 import { formatCurrency, formatDate } from '../lib/currency.js';
 import type { DashboardMetrics } from '@store/shared';
 
@@ -42,21 +43,11 @@ export function DashboardPage() {
         </div>
       )}
 
+      <SalesAnalyticsPanel />
+
       {!loading && metrics && (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <MetricCard
-              label="Total Revenue"
-              value={formatCurrency(metrics.totalRevenueCents, metrics.currency)}
-              note="Confirmed orders only"
-              icon={<RevenueIcon />}
-            />
-            <MetricCard
-              label="Confirmed Orders"
-              value={metrics.confirmedOrderCount.toString()}
-              note="All time"
-              icon={<OrderIcon />}
-            />
+          <div className="grid gap-4 sm:grid-cols-2">
             <MetricCard
               label="Active Products"
               value={metrics.activeProductCount.toString()}
@@ -161,13 +152,6 @@ function QuickAction({ href, label, description, icon }: {
   );
 }
 
-function RevenueIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-5 w-5">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  );
-}
 function OrderIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-5 w-5">

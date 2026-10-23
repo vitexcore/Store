@@ -29,17 +29,20 @@ interface RecentOrderRow {
 }
 
 export async function getDashboardMetrics(storeId: string): Promise<DashboardMetrics> {
-  // Single aggregated query for metrics
-  const metricsResult = await query<MetricsRow>(
+  // Single aggregated query for metrics — join stores to pick up the default currency
+  const metricsResult = await query<MetricsRow & { default_currency: string }>(
     `SELECT
-       COALESCE(SUM(CASE WHEN status = 'confirmed' THEN total_cents ELSE 0 END), 0) AS total_revenue_cents,
-       COUNT(CASE WHEN status = 'confirmed' THEN 1 END)                              AS confirmed_order_count,
-       (SELECT COUNT(*) FROM products WHERE store_id = $1 AND status = 'active')     AS active_product_count,
+       COALESCE(SUM(CASE WHEN o.status = 'confirmed' THEN o.total_cents ELSE 0 END), 0) AS total_revenue_cents,
+       COUNT(CASE WHEN o.status = 'confirmed' THEN 1 END)                                AS confirmed_order_count,
+       (SELECT COUNT(*) FROM products WHERE store_id = $1 AND status = 'active')         AS active_product_count,
        (SELECT COUNT(*) FROM products
         WHERE store_id = $1 AND status <> 'archived'
-          AND stock_quantity <= low_stock_threshold)                                  AS low_stock_product_count
-     FROM orders
-     WHERE store_id = $1`,
+          AND stock_quantity <= low_stock_threshold)                                      AS low_stock_product_count,
+       s.default_currency
+     FROM stores s
+     LEFT JOIN orders o ON o.store_id = s.id
+     WHERE s.id = $1
+     GROUP BY s.default_currency`,
     [storeId],
   );
 
@@ -57,7 +60,7 @@ export async function getDashboardMetrics(storeId: string): Promise<DashboardMet
 
   return {
     totalRevenueCents: parseInt(m.total_revenue_cents, 10),
-    currency: 'GBP', // store's default_currency — kept simple for now
+    currency: m.default_currency,
     confirmedOrderCount: parseInt(m.confirmed_order_count, 10),
     activeProductCount: parseInt(m.active_product_count, 10),
     lowStockProductCount: parseInt(m.low_stock_product_count, 10),

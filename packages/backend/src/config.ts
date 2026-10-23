@@ -60,6 +60,11 @@ export const config = {
   // Feature flags
   logLevel: optional('LOG_LEVEL', 'info'),
 
+  // Calendar timezone used for analytics date boundaries and daily grouping.
+  // All analytics requests are interpreted in this single timezone, never the
+  // browser's local timezone or an implicit server timezone.
+  analyticsTimeZone: optional('ANALYTICS_TIMEZONE', 'Africa/Lagos'),
+
   // Paystack — test mode only. Use sk_test_... key.
   // Keep secret key server-side; never expose to frontend or logs.
   paystackSecretKey: process.env['PAYSTACK_SECRET_KEY'] ?? null,
@@ -68,6 +73,13 @@ export const config = {
   // The callback does NOT mark payment as successful — webhook verification does.
   paystackCallbackUrl: optional('PAYSTACK_CALLBACK_URL', 'http://localhost:5173/payment/callback'),
 } as const;
+
+// Validate the analytics timezone early so a typo fails at startup, not on a request.
+try {
+  new Intl.DateTimeFormat('en-US', { timeZone: config.analyticsTimeZone });
+} catch {
+  throw new Error(`ANALYTICS_TIMEZONE is not a valid IANA timezone: ${config.analyticsTimeZone}`);
+}
 
 // Validate session secret length in production AND test — dev allows placeholder for convenience
 if (config.env !== 'development' && config.sessionSecret.length < 32) {

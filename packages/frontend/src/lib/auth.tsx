@@ -50,6 +50,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await api.auth.login(email, password);
     setLoading(false);
     if (res.ok) {
+      // The server regenerates the session on login, issuing a new session
+      // cookie. Any CSRF token fetched before login used 'anonymous' as the
+      // session identifier and is now invalid. Clear it so the next
+      // state-changing request fetches a fresh token bound to the new session.
+      resetCsrfToken();
       setUser(res.data.user);
       return true;
     }
@@ -63,6 +68,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await api.auth.register(email, password, storeName);
     setLoading(false);
     if (res.ok) {
+      // Same as login: session regeneration invalidates any prior CSRF token.
+      resetCsrfToken();
       setUser(res.data.user);
       return true;
     }

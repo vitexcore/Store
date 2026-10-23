@@ -19,6 +19,9 @@ vi.mock('../lib/api.js', () => ({
     dashboard: {
       get: vi.fn().mockResolvedValue({ ok: false, code: 'NETWORK_ERROR', message: 'No server in test' }),
     },
+    analytics: {
+      sales: vi.fn().mockResolvedValue({ ok: false, code: 'NETWORK_ERROR', message: 'No server in test' }),
+    },
     store: {
       get: vi.fn().mockResolvedValue({ ok: false, code: 'NETWORK_ERROR', message: 'No server in test' }),
     },
@@ -41,7 +44,10 @@ describe('DashboardPage', () => {
 
   it('renders loading state initially', () => {
     render(<DashboardPage />, { wrapper: Wrapper });
-    expect(screen.getByRole('status')).toBeInTheDocument();
+    // DashboardPage and SalesAnalyticsPanel each render a LoadingSpinner (role=status)
+    // while their respective API requests are pending, so there may be multiple.
+    const spinners = screen.getAllByRole('status');
+    expect(spinners.length).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -51,9 +57,9 @@ describe('CheckoutPage', () => {
     expect(screen.getByRole('heading', { name: 'QR Checkout' })).toBeInTheDocument();
   });
 
-  it('shows the payment disclaimer', () => {
+  it('shows the payment security disclaimer', () => {
     render(<CheckoutPage />, { wrapper: Wrapper });
-    expect(screen.getByText(/paystack test mode/i)).toBeInTheDocument();
+    expect(screen.getByText(/payment status is determined exclusively/i)).toBeInTheDocument();
   });
 });
 

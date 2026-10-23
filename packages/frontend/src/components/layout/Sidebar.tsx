@@ -136,12 +136,6 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           </ul>
         </nav>
 
-        {/* Footer — demo disclaimer */}
-        <div className="border-t border-slate-800 px-4 py-3">
-          <p className="text-2xs text-slate-500 leading-relaxed">
-            Demo application. Payments are simulated and do not transfer real funds.
-          </p>
-        </div>
       </aside>
     </>
   );
