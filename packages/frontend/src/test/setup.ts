@@ -1,4 +1,11 @@
 import '@testing-library/jest-dom';
+import { vi } from 'vitest';
+
+// jsdom has no layout engine and does not implement this browser scrolling API.
+Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+  configurable: true,
+  value: vi.fn(),
+});
 
 // jsdom does not implement window.matchMedia. Provide a minimal stub so that
 // ThemeProvider (which calls matchMedia for OS dark-mode preference detection)

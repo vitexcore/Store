@@ -1,5 +1,7 @@
 import { Router, Request, Response, IRouter } from 'express';
+import rateLimit from 'express-rate-limit';
 import type { ApiSuccess, ApiError, PaginatedData, ProductStatus } from '@store/shared';
+import type { AssistantQuery, AssistantResponse } from '@store/shared';
 import { SUPPORTED_CURRENCIES, MAX_LENGTHS, DEFAULT_CURRENCY } from '@store/shared';
 import { isUuid, isNonEmptyString, isNonNegativeInt, isOneOf } from '@store/shared';
 import {
@@ -9,9 +11,10 @@ import {
 import { query } from '../db/pool.js';
 import { getStore, updateStore } from '../services/storeService.js';
 import { listProducts, getProduct, createProduct, updateProduct, archiveProduct, deleteProduct } from '../services/productService.js';
-import { getInventorySummary, adjustStock } from '../services/inventoryService.js';
+import { getInventorySummary, adjustStock, getInventoryAnalytics } from '../services/inventoryService.js';
 import { getDashboardMetrics } from '../services/dashboardService.js';
 import { getSalesAnalytics, AnalyticsValidationError } from '../services/analyticsService.js';
+import { queryAssistant, isAiConfigured } from '../services/aiService.js';
 
 export const apiRouter: IRouter = Router();
 
@@ -690,12 +693,84 @@ apiRouter.get('/transactions/:id', async (req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
-// AI Assistant (stub — read-only, implemented in later stage)
+// AI Assistant — read-only business analytics query
 // ---------------------------------------------------------------------------
-apiRouter.post('/assistant/query', (_req: Request, res: Response) => {
-  const body: ApiSuccess<{ message: string }> = {
-    ok: true,
-    data: { message: 'AI assistant query — implementation coming in a later day.' },
-  };
-  res.status(200).json(body);
+
+// Per-route rate limiter: 20 requests per 15 minutes per IP.
+// Skipped in test environment so integration tests can run freely.
+const assistantRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  skip: () => (process.env['NODE_ENV'] ?? 'development') === 'test',
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, code: 'RATE_LIMITED', message: 'Too many AI assistant requests. Please try again later.' },
+});
+
+// Fallback replies indexed by AiResult error code.
+const FALLBACK_REPLIES: Record<string, string> = {
+  AI_UNAVAILABLE: 'The AI assistant is not available right now. Your analytics data is shown below.',
+  AI_TIMEOUT: 'The AI assistant took too long to respond. Your analytics data is shown below.',
+  AI_RATE_LIMITED: 'The AI assistant is temporarily busy. Please try again in a moment. Your analytics data is shown below.',
+};
+
+// isAiConfigured is imported from aiService and re-exported here for use in tests.
+export { isAiConfigured };
+
+apiRouter.post('/assistant/query', assistantRateLimit, async (req: Request, res: Response) => {
+  // 1. Validate question
+  const { question, preset, start, end } = req.body as Partial<AssistantQuery> & { [key: string]: unknown };
+
+  if (typeof question !== 'string' || question.trim().length === 0) {
+    const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: 'question is required and must be a non-empty string.' };
+    return res.status(400).json(body);
+  }
+  if (question.length > 1000) {
+    const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: 'question must not exceed 1000 characters.' };
+    return res.status(400).json(body);
+  }
+
+  try {
+    // 2 & 3. Fetch analytics and inventory intelligence — storeId always from session, never from body.
+    // getSalesAnalytics validates preset/start/end and throws AnalyticsValidationError on bad input.
+    const [analytics, inventory] = await Promise.all([
+      getSalesAnalytics(req.user!.storeId!, { preset, start, end }),
+      getInventoryAnalytics(req.user!.storeId!, { question: question.trim() }),
+    ]);
+
+    // 4. Call AI assistant
+    const result = await queryAssistant(req.user!.storeId!, question.trim(), analytics, inventory);
+
+    if (!result.available) {
+      // Graceful fallback — still 200 with analytics and inventory data so the frontend can display it
+      const fallbackReply = FALLBACK_REPLIES[result.code] ?? FALLBACK_REPLIES['AI_UNAVAILABLE']!;
+      const data: AssistantResponse = {
+        reply: fallbackReply,
+        model: 'fallback',
+        analytics,
+        inventory,
+        aiGenerated: false,
+      };
+      const body: ApiSuccess<AssistantResponse> = { ok: true, data };
+      return res.status(200).json(body);
+    }
+
+    const data: AssistantResponse = {
+      reply: result.reply,
+      model: result.model,
+      analytics,
+      inventory,
+      aiGenerated: true,
+    };
+    const body: ApiSuccess<AssistantResponse> = { ok: true, data };
+    return res.status(200).json(body);
+  } catch (err) {
+    if (err instanceof AnalyticsValidationError) {
+      const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: err.message };
+      return res.status(400).json(body);
+    }
+    console.error('[assistant] query error:', err instanceof Error ? err.message : String(err));
+    const body: ApiError = { ok: false, code: 'INTERNAL_ERROR', message: 'Failed to process assistant query.' };
+    return res.status(500).json(body);
+  }
 });

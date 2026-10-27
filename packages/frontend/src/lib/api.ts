@@ -24,6 +24,7 @@ import type {
   PaymentStatusResponse,
   StorefrontProduct,
   StorefrontInfo,
+  AssistantResponse,
 } from '@store/shared';
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? '';
@@ -211,6 +212,19 @@ export const api = {
       const qs = q.toString();
       return apiFetch<SalesAnalytics>(`/api/analytics/sales${qs ? `?${qs}` : ''}`);
     },
+  },
+
+  assistant: {
+    query: (params: {
+      question: string;
+      preset?: 'today' | '7d' | '30d';
+      start?: string;
+      end?: string;
+    }) =>
+      apiFetch<AssistantResponse>('/api/assistant/query', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      }),
   },
 
   products: {

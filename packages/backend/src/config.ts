@@ -72,6 +72,15 @@ export const config = {
   // Callback URL for Paystack redirect after payment (must be a trusted, configured URL).
   // The callback does NOT mark payment as successful — webhook verification does.
   paystackCallbackUrl: optional('PAYSTACK_CALLBACK_URL', 'http://localhost:5173/payment/callback'),
+
+  // AI assistant — OpenRouter (OpenAI-compatible API).
+  // Key prefix: sk-or-v1-... Keep server-side, never expose in responses or logs.
+  // Without this key the assistant returns a graceful unavailable response.
+  aiApiKey: process.env['AI_API_KEY'] ?? null,
+  // Model slug for OpenRouter. See https://openrouter.ai/models
+  aiModel: optional('AI_MODEL', 'google/gemini-3.8-flash'),
+  // Max tokens per response (controls cost and latency)
+  aiMaxTokens: optionalInt('AI_MAX_TOKENS', 1024),
 } as const;
 
 // Validate the analytics timezone early so a typo fails at startup, not on a request.

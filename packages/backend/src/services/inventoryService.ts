@@ -7,7 +7,15 @@
  */
 
 import { query, getClient } from '../db/pool.js';
-import type { Product, InventoryAdjustment, PaginatedData } from '@store/shared';
+import type {
+  Product,
+  InventoryAdjustment,
+  PaginatedData,
+  InventoryAnalytics,
+  ProductStockItem,
+  InventoryUnavailableItem,
+  InventoryAttentionItem,
+} from '@store/shared';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '@store/shared';
 
 // ---------------------------------------------------------------------------
@@ -173,4 +181,235 @@ export async function adjustStock(input: AdjustStockInput): Promise<AdjustStockR
   } finally {
     client.release();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Inventory Analytics & Intelligence
+// Deterministic aggregated data and lists for the AI business assistant.
+// Scoped exclusively to the authenticated store.
+// ---------------------------------------------------------------------------
+
+export interface InventoryAnalyticsOptions {
+  question?: string;
+}
+
+export async function getInventoryAnalytics(
+  storeId: string,
+  options: InventoryAnalyticsOptions = {},
+): Promise<InventoryAnalytics> {
+  // 1. Aggregated counts in a single query
+  const countsResult = await query<{
+    total_products: string;
+    available_products: string;
+    low_stock_products: string;
+    out_of_stock_products: string;
+    unavailable_products: string;
+    inactive_products: string;
+    active_products: string;
+    draft_products: string;
+    archived_products: string;
+    total_stock_units: string;
+  }>(
+    `SELECT
+       COUNT(*)::text AS total_products,
+       COUNT(CASE WHEN status = 'active' AND stock_quantity > 0 THEN 1 END)::text AS available_products,
+       COUNT(CASE WHEN stock_quantity > 0 AND stock_quantity <= low_stock_threshold THEN 1 END)::text AS low_stock_products,
+       COUNT(CASE WHEN stock_quantity = 0 THEN 1 END)::text AS out_of_stock_products,
+       COUNT(CASE WHEN status <> 'active' OR stock_quantity = 0 THEN 1 END)::text AS unavailable_products,
+       COUNT(CASE WHEN status <> 'active' THEN 1 END)::text AS inactive_products,
+       COUNT(CASE WHEN status = 'active' THEN 1 END)::text AS active_products,
+       COUNT(CASE WHEN status = 'draft' THEN 1 END)::text AS draft_products,
+       COUNT(CASE WHEN status = 'archived' THEN 1 END)::text AS archived_products,
+       COALESCE(SUM(stock_quantity), 0)::text AS total_stock_units
+     FROM products
+     WHERE store_id = $1`,
+    [storeId],
+  );
+
+  const row = countsResult.rows[0];
+  const totalProducts = parseInt(row?.total_products ?? '0', 10);
+  const availableProductsCount = parseInt(row?.available_products ?? '0', 10);
+  const lowStockProductsCount = parseInt(row?.low_stock_products ?? '0', 10);
+  const outOfStockProductsCount = parseInt(row?.out_of_stock_products ?? '0', 10);
+  const unavailableProductsCount = parseInt(row?.unavailable_products ?? '0', 10);
+  const inactiveProductsCount = parseInt(row?.inactive_products ?? '0', 10);
+  const activeProductsCount = parseInt(row?.active_products ?? '0', 10);
+  const draftProductsCount = parseInt(row?.draft_products ?? '0', 10);
+  const archivedProductsCount = parseInt(row?.archived_products ?? '0', 10);
+  const totalStockUnits = parseInt(row?.total_stock_units ?? '0', 10);
+
+  // Helper to convert DB row to ProductStockItem
+  const mapItem = (r: ProductStockRow): ProductStockItem => ({
+    id: r.id,
+    name: r.name,
+    stockQuantity: r.stock_quantity,
+    lowStockThreshold: r.low_stock_threshold,
+    status: r.status,
+    priceCents: r.price_cents,
+    currency: r.currency,
+  });
+
+  // 2. Fetch specific lists in parallel
+  const [
+    lowStockResult,
+    outOfStockResult,
+    unavailableResult,
+    inactiveResult,
+    lowestStockResult,
+    attentionResult,
+  ] = await Promise.all([
+    // Low stock: stock > 0 AND stock <= threshold
+    query<ProductStockRow>(
+      `SELECT ${PRODUCT_COLUMNS} FROM products
+       WHERE store_id = $1 AND stock_quantity > 0 AND stock_quantity <= low_stock_threshold
+       ORDER BY stock_quantity ASC, name ASC
+       LIMIT 50`,
+      [storeId],
+    ),
+    // Out of stock: stock = 0
+    query<ProductStockRow>(
+      `SELECT ${PRODUCT_COLUMNS} FROM products
+       WHERE store_id = $1 AND stock_quantity = 0
+       ORDER BY name ASC
+       LIMIT 50`,
+      [storeId],
+    ),
+    // Unavailable: status <> 'active' OR stock = 0
+    query<ProductStockRow>(
+      `SELECT ${PRODUCT_COLUMNS} FROM products
+       WHERE store_id = $1 AND (status <> 'active' OR stock_quantity = 0)
+       ORDER BY name ASC
+       LIMIT 50`,
+      [storeId],
+    ),
+    // Inactive: status <> 'active'
+    query<ProductStockRow>(
+      `SELECT ${PRODUCT_COLUMNS} FROM products
+       WHERE store_id = $1 AND status <> 'active'
+       ORDER BY name ASC
+       LIMIT 50`,
+      [storeId],
+    ),
+    // Lowest stock: ordered by stock_quantity ASC
+    query<ProductStockRow>(
+      `SELECT ${PRODUCT_COLUMNS} FROM products
+       WHERE store_id = $1
+       ORDER BY stock_quantity ASC, name ASC
+       LIMIT 10`,
+      [storeId],
+    ),
+    // Attention needed: stock = 0 OR (stock > 0 AND stock <= threshold)
+    query<ProductStockRow>(
+      `SELECT ${PRODUCT_COLUMNS} FROM products
+       WHERE store_id = $1 AND (stock_quantity = 0 OR (stock_quantity > 0 AND stock_quantity <= low_stock_threshold))
+       ORDER BY stock_quantity ASC, name ASC
+       LIMIT 50`,
+      [storeId],
+    ),
+  ]);
+
+  const lowStockProducts = lowStockResult.rows.map(mapItem);
+  const outOfStockProducts = outOfStockResult.rows.map(mapItem);
+
+  const unavailableProducts: InventoryUnavailableItem[] = unavailableResult.rows.map((r) => {
+    let reason: 'out_of_stock' | 'inactive' | 'inactive_and_out_of_stock';
+    if (r.status !== 'active' && r.stock_quantity === 0) {
+      reason = 'inactive_and_out_of_stock';
+    } else if (r.status !== 'active') {
+      reason = 'inactive';
+    } else {
+      reason = 'out_of_stock';
+    }
+    return { ...mapItem(r), reason };
+  });
+
+  const inactiveProducts = inactiveResult.rows.map(mapItem);
+  const lowestStockProducts = lowestStockResult.rows.map(mapItem);
+
+  const attentionNeededProducts: InventoryAttentionItem[] = attentionResult.rows.map((r) => ({
+    ...mapItem(r),
+    issue: r.stock_quantity === 0 ? 'out_of_stock' : 'low_stock',
+  }));
+
+  // 3. If catalogue is small (<= 100 products), load all products for full context
+  let allProducts: ProductStockItem[] | undefined;
+  if (totalProducts <= 100) {
+    const allResult = await query<ProductStockRow>(
+      `SELECT ${PRODUCT_COLUMNS} FROM products
+       WHERE store_id = $1
+       ORDER BY name ASC
+       LIMIT 100`,
+      [storeId],
+    );
+    allProducts = allResult.rows.map(mapItem);
+  }
+
+  // 4. Product matching from question (for "Show me current stock quantity of X")
+  let matchedProducts: ProductStockItem[] | undefined;
+  if (options.question && options.question.trim().length > 0) {
+    const qClean = options.question.trim().replace(/[?!.,;:'"()]/g, ' ');
+
+    // First: Check if the question contains the full name of any product
+    const fullNameMatches = await query<ProductStockRow>(
+      `SELECT ${PRODUCT_COLUMNS} FROM products
+       WHERE store_id = $1 AND $2 ILIKE '%' || name || '%'
+       ORDER BY char_length(name) DESC, name ASC
+       LIMIT 10`,
+      [storeId, qClean],
+    );
+
+    if (fullNameMatches.rows.length > 0) {
+      matchedProducts = fullNameMatches.rows.map(mapItem);
+    } else {
+      // Second: Fall back to significant keywords (>= 3 chars, ignoring common stopwords)
+      const stopwords = new Set([
+        'what', 'how', 'many', 'much', 'the', 'for', 'and', 'are', 'is', 'which',
+        'show', 'tell', 'give', 'product', 'products', 'item', 'items', 'stock',
+        'quantity', 'level', 'levels', 'current', 'have', 'store', 'available',
+        'running', 'finished', 'about', 'some', 'any', 'lowest', 'highest',
+        'inventory', 'attention', 'need', 'out', 'low',
+      ]);
+      const words = qClean
+        .split(/\s+/)
+        .map((w) => w.toLowerCase())
+        .filter((w) => w.length >= 3 && !stopwords.has(w));
+
+      if (words.length > 0) {
+        const keywordPatterns = words.map((w) => `%${w}%`);
+        const keywordMatches = await query<ProductStockRow>(
+          `SELECT ${PRODUCT_COLUMNS} FROM products
+           WHERE store_id = $1 AND name ILIKE ANY($2)
+           ORDER BY name ASC
+           LIMIT 10`,
+          [storeId, keywordPatterns],
+        );
+        matchedProducts = keywordMatches.rows.map(mapItem);
+      } else {
+        matchedProducts = [];
+      }
+    }
+  }
+
+  return {
+    totalProducts,
+    availableProductsCount,
+    lowStockProductsCount,
+    outOfStockProductsCount,
+    unavailableProductsCount,
+    inactiveProductsCount,
+    totalStockUnits,
+    statusBreakdown: {
+      active: activeProductsCount,
+      draft: draftProductsCount,
+      archived: archivedProductsCount,
+    },
+    lowStockProducts,
+    outOfStockProducts,
+    unavailableProducts,
+    inactiveProducts,
+    lowestStockProducts,
+    attentionNeededProducts,
+    ...(matchedProducts !== undefined ? { matchedProducts } : {}),
+    ...(allProducts !== undefined ? { allProducts } : {}),
+  };
 }
