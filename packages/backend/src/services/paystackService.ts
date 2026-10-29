@@ -67,9 +67,13 @@ function getSecretKey(): string | null {
   return config.paystackSecretKey ?? null;
 }
 
+export function isPaystackTestKey(key: string | null): boolean {
+  if (typeof key !== 'string' || !key.startsWith('sk_test_') || key.length <= 10) return false;
+  return !/(?:change[_-]?me|placeholder|your[_-]?key)/i.test(key.slice('sk_test_'.length));
+}
+
 function isConfigured(): boolean {
-  const key = getSecretKey();
-  return key !== null && key.length > 10;
+  return isPaystackTestKey(getSecretKey());
 }
 
 // ---------------------------------------------------------------------------
@@ -82,8 +86,8 @@ async function paystackRequest<T>(
   body?: Record<string, unknown>,
 ): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
   const secretKey = getSecretKey();
-  if (!secretKey) {
-    return { ok: false, error: 'Paystack is not configured. Set PAYSTACK_SECRET_KEY.' };
+  if (!isPaystackTestKey(secretKey)) {
+    return { ok: false, error: 'Paystack test credentials are not configured.' };
   }
 
   const controller = new AbortController();
@@ -237,7 +241,7 @@ export async function verifyPaystackPayment(
  */
 export function verifyPaystackWebhookSignature(rawBody: Buffer, signature: string): boolean {
   const secretKey = getSecretKey();
-  if (!secretKey) return false;
+  if (typeof secretKey !== 'string' || !isPaystackTestKey(secretKey)) return false;
 
   try {
     const expected = crypto

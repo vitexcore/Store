@@ -71,7 +71,7 @@ export const config = {
 
   // Callback URL for Paystack redirect after payment (must be a trusted, configured URL).
   // The callback does NOT mark payment as successful — webhook verification does.
-  paystackCallbackUrl: optional('PAYSTACK_CALLBACK_URL', 'http://localhost:5173/payment/callback'),
+  paystackCallbackUrl: optional('PAYSTACK_CALLBACK_URL', 'http://localhost:3001/api/checkout/paystack/callback'),
 
   // AI assistant — OpenRouter (OpenAI-compatible API).
   // Key prefix: sk-or-v1-... Keep server-side, never expose in responses or logs.

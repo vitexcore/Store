@@ -130,6 +130,18 @@ describe('Product creation with valid CSRF', () => {
     expect(res.body.data.stockQuantity).toBe(7);
     expect(res.body.data.currency).toBe('NGN');
   });
+
+  it('rejects non-HTTP image URLs before storing product data', async () => {
+    const { cookies, csrfToken } = await registerAndLogin(uniqueEmail());
+    const res = await request(app)
+      .post('/api/products')
+      .set('Cookie', cookies)
+      .set('x-csrf-token', csrfToken)
+      .send({ ...makeProduct(), image_url: 'javascript:alert(1)' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('VALIDATION_ERROR');
+  });
 });
 
 // ---------------------------------------------------------------------------

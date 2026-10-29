@@ -7,6 +7,7 @@
  */
 
 import { query, getClient } from '../db/pool.js';
+import { config } from '../config.js';
 import type {
   Product,
   InventoryAdjustment,
@@ -15,6 +16,13 @@ import type {
   ProductStockItem,
   InventoryUnavailableItem,
   InventoryAttentionItem,
+  ProductStatus,
+  InventoryAlert,
+  InventoryAlerts,
+  InventoryAlertType,
+  InventoryAlertSeverity,
+  RestockRecommendation,
+  RestockRecommendations,
 } from '@store/shared';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '@store/shared';
 
@@ -412,4 +420,311 @@ export async function getInventoryAnalytics(
     ...(matchedProducts !== undefined ? { matchedProducts } : {}),
     ...(allProducts !== undefined ? { allProducts } : {}),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Inventory alerts — computed dynamically from current product state.
+//
+// Design choice: alerts are NOT persisted. Each request re-derives the alert
+// set from the products table, so:
+//   * The same condition can never produce duplicate alert rows.
+//   * Alerts always reflect the latest trusted inventory state — an alert
+//     "resolves" automatically once stock changes (no stale resolution state).
+//   * No new table, migration, or background reconciliation is required.
+//   * Performance is adequate because the query is store-scoped, uses the
+//     idx_inventory_alerts_store_stock_status index, and is bounded by LIMIT.
+// ---------------------------------------------------------------------------
+
+export interface GetInventoryAlertsOptions {
+  limit?: number;
+}
+
+export async function getInventoryAlerts(
+  storeId: string,
+  options: GetInventoryAlertsOptions = {},
+): Promise<InventoryAlerts> {
+  const limit = Math.min(200, Math.max(1, Math.floor(options.limit ?? 50)));
+
+  const [result, countResult] = await Promise.all([
+    query<{
+    id: string;
+    name: string;
+    stock_quantity: number;
+    low_stock_threshold: number;
+    status: ProductStatus;
+    updated_at: Date;
+    }>(
+    `SELECT id, name, stock_quantity, low_stock_threshold, status, updated_at
+     FROM products
+     WHERE store_id = $1
+       AND (stock_quantity = 0 OR stock_quantity <= low_stock_threshold OR status <> 'active')
+     ORDER BY stock_quantity ASC, name ASC
+     LIMIT $2`,
+    [storeId, limit],
+    ),
+    query<{
+      out_of_stock: string;
+      low_stock: string;
+      inactive: string;
+      critical: string;
+      total: string;
+    }>(
+      `SELECT
+         COUNT(*) FILTER (WHERE stock_quantity = 0)::text AS out_of_stock,
+         COUNT(*) FILTER (WHERE stock_quantity > 0 AND stock_quantity <= low_stock_threshold)::text AS low_stock,
+         COUNT(*) FILTER (WHERE status <> 'active' AND stock_quantity > 0 AND stock_quantity > low_stock_threshold)::text AS inactive,
+         COUNT(*) FILTER (WHERE stock_quantity = 0 OR (stock_quantity > 0 AND stock_quantity <= GREATEST(1, FLOOR(low_stock_threshold / 2.0))))::text AS critical,
+         COUNT(*) FILTER (WHERE stock_quantity = 0 OR (stock_quantity > 0 AND stock_quantity <= low_stock_threshold) OR status <> 'active')::text AS total
+       FROM products
+       WHERE store_id = $1`,
+      [storeId],
+    ),
+  ]);
+
+  const alerts: InventoryAlert[] = result.rows.map((row): InventoryAlert | null => {
+    const stock = row.stock_quantity;
+    const threshold = row.low_stock_threshold;
+    const outOfStock = stock === 0;
+    const inactive = row.status !== 'active';
+    const lowStock = stock > 0 && stock <= threshold;
+
+    // Primary condition priority per product: out_of_stock > low_stock > inactive.
+    // One alert per product prevents duplicate alert rows for the same item.
+    let type: InventoryAlertType;
+    let reason: string;
+    let severity: InventoryAlertSeverity;
+    let unavailable: boolean;
+
+    if (outOfStock) {
+      type = 'out_of_stock';
+      reason = 'No units left in stock — product cannot be purchased.';
+      severity = 'critical';
+      unavailable = true;
+    } else if (lowStock) {
+      type = 'low_stock';
+      // Low-stock products with active status remain purchasable.
+      unavailable = false;
+      const halfThreshold = Math.max(1, Math.floor(threshold / 2));
+      if (stock <= halfThreshold) {
+        reason = `Only ${stock} unit(s) left — at or below half the low-stock threshold (${threshold}).`;
+        severity = 'critical';
+      } else {
+        reason = `${stock} unit(s) left — at or below the low-stock threshold of ${threshold}.`;
+        severity = 'warning';
+      }
+    } else if (inactive) {
+      type = 'inactive';
+      reason = 'Product is not active and cannot be purchased.';
+      severity = row.status === 'archived' ? 'info' : 'warning';
+      unavailable = true;
+    } else {
+      return null; // No alert condition for this product.
+    }
+
+    return {
+      id: `${row.id}:${type}`,
+      productId: row.id,
+      name: row.name,
+      stockQuantity: stock,
+      lowStockThreshold: threshold,
+      status: row.status,
+      type,
+      reason,
+      severity,
+      lastUpdated: row.updated_at.toISOString(),
+      unavailable,
+    };
+  }).filter((alert): alert is InventoryAlert => alert !== null);
+
+  const countRow = countResult.rows[0];
+  const counts = {
+    outOfStock: Number(countRow?.out_of_stock ?? 0),
+    lowStock: Number(countRow?.low_stock ?? 0),
+    inactive: Number(countRow?.inactive ?? 0),
+    total: Number(countRow?.total ?? 0),
+    critical: Number(countRow?.critical ?? 0),
+  };
+
+  return { alerts, counts };
+}
+
+// ---------------------------------------------------------------------------
+// Restock recommendations — deterministic, read-only.
+//
+// Recommendations are derived from current stock plus completed-sales velocity
+// in a lookback window. They are estimates only: the AI may phrase or
+// prioritize them, but it must not treat them as authoritative stock or sales
+// totals, and the backend never creates purchase orders from them.
+// ---------------------------------------------------------------------------
+
+export interface GetRestockRecommendationsOptions {
+  lookbackDays?: number;      // sales window for velocity (default 30)
+  targetCoverageDays?: number; // days of stock to target (default 14)
+  limit?: number;
+}
+
+export async function getRestockRecommendations(
+  storeId: string,
+  options: GetRestockRecommendationsOptions = {},
+): Promise<RestockRecommendations> {
+  const lookbackDays = Math.min(366, Math.max(7, Math.floor(options.lookbackDays ?? 30)));
+  const targetCoverageDays = Math.max(1, Math.floor(options.targetCoverageDays ?? 14));
+  const limit = Math.min(100, Math.max(1, Math.floor(options.limit ?? 20)));
+
+  const timeZone = config.analyticsTimeZone;
+  const today = todayInTimeZoneUTC(timeZone);
+  const windowStart = addDaysUTC(today, -lookbackDays + 1); // inclusive window
+
+  // Store default currency so we only count completed sales in that currency.
+  const storeResult = await query<{ default_currency: string }>(
+    'SELECT default_currency FROM stores WHERE id = $1',
+    [storeId],
+  );
+  const currency = storeResult.rows[0]?.default_currency;
+  if (!currency) {
+    return { recommendations: [], dataCoverageNote: 'Store not found.' };
+  }
+
+  // Completed-sales units per product in the lookback window (confirmed order
+  // with at least one paid transaction). This is the trusted demand signal.
+  const salesResult = await query<{
+    product_id: string;
+    units_sold: string;
+  }>(
+    `WITH completed_sales AS (
+       SELECT o.id AS order_id
+       FROM orders o
+       JOIN transactions t ON t.order_id = o.id AND t.status = 'paid'
+       WHERE o.store_id = $1
+         AND o.status = 'confirmed'
+         AND o.currency = $2
+         AND t.paid_at IS NOT NULL
+         AND t.paid_at >= ($3::date AT TIME ZONE $4::text)
+         AND t.paid_at < (($5::date + 1) AT TIME ZONE $4::text)
+     )
+     SELECT oi.product_id, COALESCE(SUM(oi.quantity), 0)::bigint AS units_sold
+     FROM order_items oi
+     JOIN completed_sales cs ON cs.order_id = oi.order_id
+     GROUP BY oi.product_id`,
+    [storeId, currency, windowStart, timeZone, today],
+  );
+
+  const unitsSoldByProduct = new Map<string, number>();
+  let totalUnitsSold = 0;
+  for (const row of salesResult.rows) {
+    const units = Number(row.units_sold);
+    unitsSoldByProduct.set(row.product_id, units);
+    totalUnitsSold += units;
+  }
+
+  // All products for the store — recommendations are generated for those
+  // needing attention, but every product is considered so nothing is missed.
+  const productsResult = await query<{
+    id: string;
+    name: string;
+    stock_quantity: number;
+    low_stock_threshold: number;
+    status: ProductStatus;
+  }>(
+    `SELECT id, name, stock_quantity, low_stock_threshold, status
+     FROM products
+     WHERE store_id = $1 AND status = 'active'
+     ORDER BY name ASC`,
+    [storeId],
+  );
+
+  const hasStoreSales = totalUnitsSold > 0;
+  const recommendations: RestockRecommendation[] = productsResult.rows.map((row) => {
+    const stock = row.stock_quantity;
+    const threshold = row.low_stock_threshold;
+    const unitsSoldRecent = unitsSoldByProduct.get(row.id) ?? 0;
+    const daysInWindow = Math.max(1, lookbackDays);
+    const dailyVelocity = unitsSoldRecent / daysInWindow;
+    const daysOfStock = dailyVelocity > 0 ? stock / dailyVelocity : null;
+
+    let reason: RestockRecommendation['reason'];
+    let suggestedQuantity: number | null = null;
+
+    const dataReliable = unitsSoldRecent > 0;
+
+    if (stock === 0) {
+      reason = 'out_of_stock';
+    } else if (daysOfStock !== null && daysOfStock <= targetCoverageDays / 2) {
+      reason = 'low_days_of_stock';
+    } else if (unitsSoldRecent > 0 && stock <= threshold * 1.5) {
+      reason = 'high_velocity_low_stock';
+    } else if (stock <= threshold) {
+      reason = 'below_threshold';
+    } else if (daysOfStock !== null && daysOfStock <= targetCoverageDays) {
+      reason = 'low_days_of_stock';
+    } else {
+      reason = 'below_threshold';
+    }
+
+    // Suggest a restock quantity only when backed by real demand data.
+    // Target: enough stock to cover `targetCoverageDays` of expected sales.
+    if (dataReliable && dailyVelocity > 0) {
+      const targetUnits = Math.ceil(dailyVelocity * targetCoverageDays);
+      suggestedQuantity = Math.max(0, targetUnits - stock);
+    }
+
+    return {
+      productId: row.id,
+      name: row.name,
+      currentStock: stock,
+      lowStockThreshold: threshold,
+      unitsSoldRecent,
+      dailyVelocity: Number(dailyVelocity.toFixed(4)),
+      daysOfStock: daysOfStock ? Number(daysOfStock.toFixed(1)) : null,
+      reason,
+      suggestedQuantity,
+      dataReliable,
+    };
+  });
+
+  // Only surface products that genuinely need attention, highest risk first.
+  const attention = recommendations.filter((r) =>
+    r.currentStock === 0 || r.currentStock <= r.lowStockThreshold ||
+    (r.daysOfStock !== null && r.daysOfStock <= targetCoverageDays),
+  );
+
+  attention.sort((a, b) => {
+    // Out of stock first, then fewest days of stock, then lowest stock.
+    if (a.currentStock === 0 && b.currentStock !== 0) return -1;
+    if (b.currentStock === 0 && a.currentStock !== 0) return 1;
+    const da = a.daysOfStock ?? Infinity;
+    const db = b.daysOfStock ?? Infinity;
+    if (da !== db) return da - db;
+    return a.currentStock - b.currentStock;
+  });
+
+  const limited = attention.slice(0, limit);
+
+  let dataCoverageNote: string;
+  if (!hasStoreSales) {
+    dataCoverageNote = `No completed sales in the last ${lookbackDays} days. Products below their thresholds are flagged for review, but no restock quantities are estimated.`;
+  } else if (limited.length === 0) {
+    dataCoverageNote = `Based on ${totalUnitsSold} unit(s) sold in the last ${lookbackDays} days; no products currently need restocking attention.`;
+  } else {
+    dataCoverageNote = `Based on ${totalUnitsSold} unit(s) sold in the last ${lookbackDays} days across ${productsResult.rows.length} product(s).`;
+  }
+
+  return { recommendations: limited, dataCoverageNote };
+}
+
+function todayInTimeZoneUTC(timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const value = (type: string): string => parts.find((part) => part.type === type)?.value ?? '';
+  return `${value('year')}-${value('month')}-${value('day')}`;
+}
+
+function addDaysUTC(date: string, delta: number): string {
+  const [year, month, day] = date.split('-').map(Number) as [number, number, number];
+  const dt = new Date(Date.UTC(year, month - 1, day + delta));
+  return dt.toISOString().slice(0, 10);
 }

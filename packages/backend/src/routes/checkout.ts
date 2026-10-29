@@ -2,8 +2,8 @@
  * Checkout routes — customer-facing order creation and payment management.
  *
  * Route map:
- *  POST /api/checkout/cart                — create order from cart (auth required)
- *  POST /api/checkout/paystack/initialize — initialize Paystack payment (auth required)
+ *  POST /api/checkout/cart                — public buyer order creation (CSRF + IP rate limit)
+ *  POST /api/checkout/paystack/initialize — public buyer payment init (opaque token + CSRF + rate limit)
  *  GET  /api/checkout/status/:token       — get payment status by token (public, no auth)
  *  GET  /api/checkout/paystack/callback   — redirect from Paystack (does NOT mark paid)
  *
@@ -23,7 +23,6 @@
 import { Router, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import type { ApiSuccess, ApiError, CheckoutResponse, PaymentStatusResponse } from '@store/shared';
-import { requireAuth, loadUser, requireStore } from '../auth/middleware.js';
 import { query } from '../db/pool.js';
 import { createOrderFromCart, getStoreBySlug, CheckoutError } from '../services/orderService.js';
 import {
@@ -64,36 +63,35 @@ const statusRateLimit = rateLimit({
 
 // ---------------------------------------------------------------------------
 // Checkout: POST /api/checkout/cart
-// Requires authentication (merchant session)
+// Public buyer checkout; CSRF and per-IP rate limits are enforced globally/here.
 // ---------------------------------------------------------------------------
 checkoutRouter.post(
   '/cart',
-  requireAuth,
-  loadUser,
-  requireStore,
   checkoutRateLimit,
   async (req: Request, res: Response) => {
-    const storeId = req.user!.storeId!;
-    const { idempotencyKey, storeSlug, items, customerName, customerEmail } = req.body;
+    const { idempotencyKey, storeSlug, items, customerName, customerEmail } =
+      (req.body ?? {}) as Record<string, unknown>;
 
-    // Validate that the storeSlug matches the authenticated merchant's store
+    if (typeof storeSlug !== 'string' || storeSlug.trim().length < 1 || storeSlug.length > 120) {
+      const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: 'A valid storeSlug is required.' };
+      return res.status(400).json(body);
+    }
+
+    // Buyer checkout is public. Resolve the target tenant from the public slug,
+    // then keep all product, price, and order reads scoped to that store.
     try {
       const store = await getStoreBySlug(storeSlug);
       if (!store) {
         const body: ApiError = { ok: false, code: 'NOT_FOUND', message: 'Store not found.' };
         return res.status(404).json(body);
       }
-      if (store.id !== storeId) {
-        const body: ApiError = { ok: false, code: 'FORBIDDEN', message: 'You can only create orders for your own store.' };
-        return res.status(403).json(body);
-      }
 
-      const result = await createOrderFromCart(storeId, storeSlug, {
-        idempotencyKey,
+      const result = await createOrderFromCart(store.id, storeSlug, {
+        idempotencyKey: idempotencyKey as string,
         storeSlug,
-        items,
-        customerName,
-        customerEmail,
+        items: items as Array<{ productId: string; quantity: number }>,
+        ...(customerName !== undefined ? { customerName: customerName as string } : {}),
+        ...(customerEmail !== undefined ? { customerEmail: customerEmail as string } : {}),
       });
 
       const body: ApiSuccess<CheckoutResponse> = { ok: true, data: result };
@@ -112,38 +110,25 @@ checkoutRouter.post(
 
 // ---------------------------------------------------------------------------
 // Checkout: POST /api/checkout/paystack/initialize
-// Requires authentication; initializes Paystack for an existing transaction
+// Public buyer request, protected by CSRF, an opaque payment token, and rate limiting.
 // ---------------------------------------------------------------------------
 checkoutRouter.post(
   '/paystack/initialize',
-  requireAuth,
-  loadUser,
-  requireStore,
   checkoutRateLimit,
   async (req: Request, res: Response) => {
-    const storeId = req.user!.storeId!;
-    const { paymentToken } = req.body;
+    const { paymentToken } = (req.body ?? {}) as Record<string, unknown>;
 
-    if (typeof paymentToken !== 'string' || paymentToken.length < 16) {
-      const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: 'paymentToken is required.' };
+    if (typeof paymentToken !== 'string' || !/^[0-9a-f]{96}$/i.test(paymentToken)) {
+      const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: 'A valid paymentToken is required.' };
       return res.status(400).json(body);
-    }
-
-    if (!isPaystackConfigured()) {
-      const body: ApiError = {
-        ok: false,
-        code: 'PAYMENT_PROVIDER_NOT_CONFIGURED',
-        message: 'Paystack is not configured. Set PAYSTACK_SECRET_KEY to enable payments.',
-      };
-      return res.status(503).json(body);
     }
 
     try {
       // Look up the transaction — verify it belongs to this store
       const txnResult = await query<{
         id: string;
-        store_id: string;
         order_id: string;
+        order_status: string;
         status: string;
         amount_cents: number;
         currency: string;
@@ -151,9 +136,12 @@ checkoutRouter.post(
         paystack_reference: string | null;
         paystack_authorization_url: string | null;
       }>(
-        `SELECT id, store_id, order_id, status, amount_cents, currency, expires_at,
-                paystack_reference, paystack_authorization_url
-         FROM transactions WHERE payment_token = $1`,
+        `SELECT t.id, t.order_id, o.status AS order_status, t.status,
+                t.amount_cents, t.currency, t.expires_at,
+                t.paystack_reference, t.paystack_authorization_url
+         FROM transactions t
+         JOIN orders o ON o.id = t.order_id
+         WHERE t.payment_token = $1`,
         [paymentToken],
       );
 
@@ -164,11 +152,6 @@ checkoutRouter.post(
 
       const txn = txnResult.rows[0]!;
 
-      if (txn.store_id !== storeId) {
-        const body: ApiError = { ok: false, code: 'FORBIDDEN', message: 'Access denied.' };
-        return res.status(403).json(body);
-      }
-
       if (txn.status === 'paid') {
         const body: ApiError = { ok: false, code: 'ALREADY_PAID', message: 'This order has already been paid.' };
         return res.status(409).json(body);
@@ -177,6 +160,11 @@ checkoutRouter.post(
       if (txn.status === 'expired' || txn.status === 'cancelled') {
         const body: ApiError = { ok: false, code: 'PAYMENT_EXPIRED', message: 'This payment request has expired or been cancelled.' };
         return res.status(410).json(body);
+      }
+
+      if (txn.status !== 'awaiting_payment' || txn.order_status !== 'pending') {
+        const body: ApiError = { ok: false, code: 'PAYMENT_NOT_PAYABLE', message: 'This order is not available for payment.' };
+        return res.status(409).json(body);
       }
 
       // Check expiry
@@ -193,6 +181,15 @@ checkoutRouter.post(
           data: { authorizationUrl: txn.paystack_authorization_url, reference: txn.paystack_reference },
         };
         return res.status(200).json(body);
+      }
+
+      if (!isPaystackConfigured()) {
+        const body: ApiError = {
+          ok: false,
+          code: 'PAYMENT_PROVIDER_NOT_CONFIGURED',
+          message: 'Paystack test credentials are not configured.',
+        };
+        return res.status(503).json(body);
       }
 
       if (!isValidAmountKobos(txn.amount_cents)) {
@@ -495,15 +492,13 @@ webhookRouter.post('/paystack', async (req: Request, res: Response) => {
     return res.status(200).json({ ok: true });
   }
 
-  // Acknowledge receipt immediately (Paystack requires fast response)
-  // Process asynchronously — do not await before responding
-  res.status(200).json({ ok: true });
-
-  // Process the event
   try {
     await processPaystackWebhook(event);
+    // Processing is a short, bounded database transaction. Acknowledge only
+    // after commit so transient database failures can be retried by Paystack.
+    return res.status(200).json({ ok: true });
   } catch (err) {
-    // Log but do not crash — Paystack will retry if we returned non-200 (which we didn't)
     console.error('[webhook] processing error:', err instanceof Error ? err.message : String(err));
+    return res.status(500).json({ ok: false });
   }
 });

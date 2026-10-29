@@ -1,6 +1,6 @@
 import { Router, Request, Response, IRouter } from 'express';
 import rateLimit from 'express-rate-limit';
-import type { ApiSuccess, ApiError, PaginatedData, ProductStatus } from '@store/shared';
+import type { ApiSuccess, ApiError, PaginatedData, ProductStatus, InventoryAlerts, RestockRecommendations } from '@store/shared';
 import type { AssistantQuery, AssistantResponse } from '@store/shared';
 import { SUPPORTED_CURRENCIES, MAX_LENGTHS, DEFAULT_CURRENCY } from '@store/shared';
 import { isUuid, isNonEmptyString, isNonNegativeInt, isOneOf } from '@store/shared';
@@ -11,7 +11,7 @@ import {
 import { query } from '../db/pool.js';
 import { getStore, updateStore } from '../services/storeService.js';
 import { listProducts, getProduct, createProduct, updateProduct, archiveProduct, deleteProduct } from '../services/productService.js';
-import { getInventorySummary, adjustStock, getInventoryAnalytics } from '../services/inventoryService.js';
+import { getInventorySummary, adjustStock, getInventoryAnalytics, getInventoryAlerts, getRestockRecommendations } from '../services/inventoryService.js';
 import { getDashboardMetrics } from '../services/dashboardService.js';
 import { getSalesAnalytics, AnalyticsValidationError } from '../services/analyticsService.js';
 import { queryAssistant, isAiConfigured } from '../services/aiService.js';
@@ -149,6 +149,18 @@ apiRouter.patch('/store', async (req: Request, res: Response) => {
 const ALLOWED_STATUSES: ProductStatus[] = ['active', 'draft', 'archived'];
 const ALLOWED_CURRENCIES = [...SUPPORTED_CURRENCIES] as string[];
 
+function isSafeImageUrl(value: unknown): boolean {
+  if (value === null) return true;
+  if (typeof value !== 'string' || value.length > 2048) return false;
+  try {
+    const parsed = new URL(value);
+    return (parsed.protocol === 'https:' || parsed.protocol === 'http:') &&
+      parsed.username.length === 0 && parsed.password.length === 0;
+  } catch {
+    return false;
+  }
+}
+
 apiRouter.get('/products', async (req: Request, res: Response) => {
   const storeId = req.user!.storeId!;
   try {
@@ -178,6 +190,14 @@ apiRouter.post('/products', async (req: Request, res: Response) => {
   }
   if (!isNonNegativeInt(price_cents)) {
     const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: 'price_cents must be a non-negative integer.' };
+    return res.status(400).json(body);
+  }
+  if (description !== undefined && (typeof description !== 'string' || description.length > MAX_LENGTHS.productDescription)) {
+    const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: `description must be a string of at most ${MAX_LENGTHS.productDescription} characters.` };
+    return res.status(400).json(body);
+  }
+  if (image_url !== undefined && !isSafeImageUrl(image_url)) {
+    const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: 'image_url must be an HTTP or HTTPS URL of at most 2048 characters.' };
     return res.status(400).json(body);
   }
   if (idempotency_key !== undefined && !isUuid(idempotency_key)) {
@@ -271,6 +291,14 @@ apiRouter.patch('/products/:id', async (req: Request, res: Response) => {
       const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: `Product name must be 1–${MAX_LENGTHS.productName} characters.` };
       return res.status(400).json(body);
     }
+    if (description !== undefined && (typeof description !== 'string' || description.length > MAX_LENGTHS.productDescription)) {
+      const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: `description must be a string of at most ${MAX_LENGTHS.productDescription} characters.` };
+      return res.status(400).json(body);
+    }
+    if (image_url !== undefined && !isSafeImageUrl(image_url)) {
+      const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: 'image_url must be an HTTP or HTTPS URL of at most 2048 characters.' };
+      return res.status(400).json(body);
+    }
     if (price_cents !== undefined && !isNonNegativeInt(price_cents)) {
       const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: 'price_cents must be a non-negative integer.' };
       return res.status(400).json(body);
@@ -348,6 +376,14 @@ apiRouter.put('/products/:id', async (req: Request, res: Response) => {
       return denyResourceAccess(res);
     }
     const { name, description, price_cents, currency, status, image_url, low_stock_threshold } = req.body;
+    if (description !== undefined && (typeof description !== 'string' || description.length > MAX_LENGTHS.productDescription)) {
+      const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: `description must be a string of at most ${MAX_LENGTHS.productDescription} characters.` };
+      return res.status(400).json(body);
+    }
+    if (image_url !== undefined && !isSafeImageUrl(image_url)) {
+      const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: 'image_url must be an HTTP or HTTPS URL of at most 2048 characters.' };
+      return res.status(400).json(body);
+    }
     if (name !== undefined && !isNonEmptyString(name, MAX_LENGTHS.productName)) {
       const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: `Product name must be 1–${MAX_LENGTHS.productName} characters.` };
       return res.status(400).json(body);
@@ -362,6 +398,10 @@ apiRouter.put('/products/:id', async (req: Request, res: Response) => {
     }
     if (status !== undefined && !ALLOWED_STATUSES.includes(status)) {
       const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: 'Status must be active, draft, or archived.' };
+      return res.status(400).json(body);
+    }
+    if (low_stock_threshold !== undefined && !isNonNegativeInt(low_stock_threshold)) {
+      const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: 'low_stock_threshold must be a non-negative integer.' };
       return res.status(400).json(body);
     }
     const updated = await updateProduct(id, { name, description, priceCents: price_cents, currency, status, imageUrl: image_url, lowStockThreshold: low_stock_threshold });
@@ -485,6 +525,40 @@ apiRouter.post('/inventory/:productId/adjust', async (req: Request, res: Respons
 });
 
 // ---------------------------------------------------------------------------
+// Inventory alerts — read-only, computed dynamically from current stock.
+// ---------------------------------------------------------------------------
+
+apiRouter.get('/inventory/alerts', async (req: Request, res: Response) => {
+  const storeId = req.user!.storeId!;
+  try {
+    const alerts = await getInventoryAlerts(storeId, { limit: 50 });
+    const body: ApiSuccess<InventoryAlerts> = { ok: true, data: alerts };
+    res.status(200).json(body);
+  } catch (err) {
+    console.error('[inventory] alerts error:', err instanceof Error ? err.message : String(err));
+    const body: ApiError = { ok: false, code: 'INTERNAL_ERROR', message: 'Failed to load inventory alerts.' };
+    res.status(500).json(body);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Restock recommendations — read-only draft for merchant review.
+// ---------------------------------------------------------------------------
+
+apiRouter.get('/inventory/restock-recommendations', async (req: Request, res: Response) => {
+  const storeId = req.user!.storeId!;
+  try {
+    const recommendations = await getRestockRecommendations(storeId);
+    const body: ApiSuccess<RestockRecommendations> = { ok: true, data: recommendations };
+    res.status(200).json(body);
+  } catch (err) {
+    console.error('[inventory] restock recommendations error:', err instanceof Error ? err.message : String(err));
+    const body: ApiError = { ok: false, code: 'INTERNAL_ERROR', message: 'Failed to load restock recommendations.' };
+    res.status(500).json(body);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Orders (paginated)
 // ---------------------------------------------------------------------------
 apiRouter.get('/orders', async (req: Request, res: Response) => {
@@ -593,6 +667,11 @@ apiRouter.patch('/orders/:id/status', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { status } = req.body;
   const allowedOrderStatuses = ['pending', 'confirmed', 'cancelled', 'refunded'] as const;
+
+  if (!isUuid(id)) {
+    const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: 'Invalid order ID.' };
+    return res.status(400).json(body);
+  }
 
   if (!isOneOf(status, allowedOrderStatuses)) {
     const body: ApiError = { ok: false, code: 'VALIDATION_ERROR', message: 'Status must be one of: pending, confirmed, cancelled, refunded.' };
@@ -731,24 +810,28 @@ apiRouter.post('/assistant/query', assistantRateLimit, async (req: Request, res:
   }
 
   try {
-    // 2 & 3. Fetch analytics and inventory intelligence — storeId always from session, never from body.
+    // 2, 3 & 4. Fetch analytics, inventory intelligence and restock
+    // recommendations — storeId always from the session, never from the body.
     // getSalesAnalytics validates preset/start/end and throws AnalyticsValidationError on bad input.
-    const [analytics, inventory] = await Promise.all([
-      getSalesAnalytics(req.user!.storeId!, { preset, start, end }),
-      getInventoryAnalytics(req.user!.storeId!, { question: question.trim() }),
+    const storeId = req.user!.storeId!;
+    const [analytics, inventory, restock] = await Promise.all([
+      getSalesAnalytics(storeId, { preset, start, end }),
+      getInventoryAnalytics(storeId, { question: question.trim() }),
+      getRestockRecommendations(storeId),
     ]);
 
-    // 4. Call AI assistant
-    const result = await queryAssistant(req.user!.storeId!, question.trim(), analytics, inventory);
+    // 5. Call AI assistant with inventory and restock context.
+    const result = await queryAssistant(storeId, question.trim(), analytics, inventory, restock);
 
     if (!result.available) {
-      // Graceful fallback — still 200 with analytics and inventory data so the frontend can display it
+      // Graceful fallback — still 200 with analytics, inventory and restock data
       const fallbackReply = FALLBACK_REPLIES[result.code] ?? FALLBACK_REPLIES['AI_UNAVAILABLE']!;
       const data: AssistantResponse = {
         reply: fallbackReply,
         model: 'fallback',
         analytics,
         inventory,
+        restock,
         aiGenerated: false,
       };
       const body: ApiSuccess<AssistantResponse> = { ok: true, data };
@@ -760,6 +843,7 @@ apiRouter.post('/assistant/query', assistantRateLimit, async (req: Request, res:
       model: result.model,
       analytics,
       inventory,
+      restock,
       aiGenerated: true,
     };
     const body: ApiSuccess<AssistantResponse> = { ok: true, data };

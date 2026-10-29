@@ -422,15 +422,101 @@ describe('POST /api/checkout/cart', () => {
     expect(secondRes.body.data.orderReference).toBe(firstRef);
   });
 
-  it('requires authentication — unauthenticated request is rejected', async () => {
-    // Without a session cookie and CSRF token, the request gets a CSRF error (403).
-    // With a valid CSRF token but no session, it would get 401.
-    // Either way, unauthenticated cart creation is denied.
+  it('rejects reuse of an idempotency key for a different cart', async () => {
+    const m = await registerUser(uniqueEmail());
+    const { slug, productId } = await setupStoreWithProduct(m);
+    const idempotencyKey = crypto.randomUUID();
+
+    const firstRes = await authed('post', '/api/checkout/cart', m.cookies, m.csrfToken, {
+      idempotencyKey,
+      storeSlug: slug,
+      items: [{ productId, quantity: 1 }],
+    });
+    expect(firstRes.status).toBe(201);
+
+    const changedCartRes = await authed('post', '/api/checkout/cart', m.cookies, m.csrfToken, {
+      idempotencyKey,
+      storeSlug: slug,
+      items: [{ productId, quantity: 2 }],
+    });
+
+    expect(changedCartRes.status).toBe(409);
+    expect(changedCartRes.body.code).toBe('IDEMPOTENCY_KEY_REUSED');
+    const count = await query<{ count: string }>(
+      'SELECT COUNT(*) AS count FROM orders WHERE store_id = $1 AND idempotency_key = $2',
+      [m.user.storeId, idempotencyKey],
+    );
+    expect(Number(count.rows[0]?.count)).toBe(1);
+  });
+
+  it('allows an unauthenticated buyer to create an order using the public store slug', async () => {
+    const merchant = await registerUser(uniqueEmail());
+    const { slug, productId, priceCents } = await setupStoreWithProduct(merchant);
+    const { csrfToken, cookies } = await getCsrfToken('');
+
     const res = await request(app)
       .post('/api/checkout/cart')
+      .set('Cookie', cookies)
+      .set('x-csrf-token', csrfToken)
       .set('Content-Type', 'application/json')
-      .send(JSON.stringify({ idempotencyKey: crypto.randomUUID(), storeSlug: 'test', items: [] }));
-    expect([401, 403]).toContain(res.status);
+      .send({ idempotencyKey: crypto.randomUUID(), storeSlug: slug, items: [{ productId, quantity: 1 }] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.amountCents).toBe(priceCents);
+  });
+
+  it('combines duplicate product lines before validating total stock', async () => {
+    const m = await registerUser(uniqueEmail());
+    const { slug, productId } = await setupStoreWithProduct(m);
+    const res = await authed('post', '/api/checkout/cart', m.cookies, m.csrfToken, {
+      idempotencyKey: crypto.randomUUID(),
+      storeSlug: slug,
+      items: [{ productId, quantity: 12 }, { productId, quantity: 12 }],
+    });
+
+    expect(res.status).toBe(422);
+    expect(res.body.code).toBe('INSUFFICIENT_STOCK');
+  });
+
+  it('scopes idempotency keys to the store and never returns another store payment token', async () => {
+    const a = await registerUser(uniqueEmail());
+    const b = await registerUser(uniqueEmail());
+    const storeA = await setupStoreWithProduct(a);
+    const storeB = await setupStoreWithProduct(b);
+    const idempotencyKey = crypto.randomUUID();
+
+    const orderA = await authed('post', '/api/checkout/cart', a.cookies, a.csrfToken, {
+      idempotencyKey,
+      storeSlug: storeA.slug,
+      items: [{ productId: storeA.productId, quantity: 1 }],
+    });
+    const orderB = await authed('post', '/api/checkout/cart', b.cookies, b.csrfToken, {
+      idempotencyKey,
+      storeSlug: storeB.slug,
+      items: [{ productId: storeB.productId, quantity: 1 }],
+    });
+
+    expect(orderA.status).toBe(201);
+    expect(orderB.status).toBe(201);
+    expect(orderB.body.data.orderId).not.toBe(orderA.body.data.orderId);
+    expect(orderB.body.data.paymentToken).not.toBe(orderA.body.data.paymentToken);
+  });
+
+  it('rejects order totals that do not fit the persisted integer money column', async () => {
+    const m = await registerUser(uniqueEmail());
+    const store = await authed('get', '/api/store', m.cookies, m.csrfToken);
+    const slug = store.body.data.slug as string;
+    const product = await authed('post', '/api/products', m.cookies, m.csrfToken, {
+      name: 'Maximum Price Product', price_cents: 2_147_483_647, status: 'active', stock_quantity: 2,
+    });
+    const res = await authed('post', '/api/checkout/cart', m.cookies, m.csrfToken, {
+      idempotencyKey: crypto.randomUUID(),
+      storeSlug: slug,
+      items: [{ productId: product.body.data.id, quantity: 2 }],
+    });
+
+    expect(res.status).toBe(422);
+    expect(res.body.code).toBe('INVALID_AMOUNT');
   });
 
   it('validates quantity must be integer > 0', async () => {

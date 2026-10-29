@@ -5,6 +5,8 @@ import { useAuth } from '../lib/auth.js';
 import { StatusBadge } from '../components/ui/StatusBadge.js';
 import { LoadingSpinner } from '../components/ui/EmptyState.js';
 import { SalesAnalyticsPanel } from '../components/analytics/SalesAnalyticsPanel.js';
+import { InventoryAlertsSection } from '../components/inventory/InventoryAlertsSection.js';
+import { RestockRecommendationsSection } from '../components/inventory/RestockRecommendationsSection.js';
 import { formatCurrency, formatDate } from '../lib/currency.js';
 import type { DashboardMetrics } from '@store/shared';
 
@@ -68,6 +70,10 @@ export function DashboardPage() {
             <QuickAction href="/orders" label="View Orders" description="Track customer orders" icon={<OrderIcon />} />
             <QuickAction href="/settings" label="Store Settings" description="Update your store profile" icon={<SettingsIcon />} />
           </div>
+
+          <InventoryAlertsSection />
+
+          <RestockRecommendationsSection />
 
           <div className="card p-0 overflow-hidden">
             <div className="px-6 py-4 border-b border-border dark:border-slate-700">

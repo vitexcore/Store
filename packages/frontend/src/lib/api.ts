@@ -25,6 +25,8 @@ import type {
   StorefrontProduct,
   StorefrontInfo,
   AssistantResponse,
+  InventoryAlerts,
+  RestockRecommendations,
 } from '@store/shared';
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? '';
@@ -266,6 +268,9 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ delta, reason }),
       }),
+    alerts: () => apiFetch<InventoryAlerts>('/api/inventory/alerts'),
+    restockRecommendations: () =>
+      apiFetch<RestockRecommendations>('/api/inventory/restock-recommendations'),
   },
 
   orders: {
@@ -305,13 +310,13 @@ export const api = {
   },
 
   checkout: {
-    /** Create an order from the cart. Requires merchant auth + CSRF. */
+    /** Create an order from the buyer cart. Public; CSRF is required. */
     createOrder: (data: CheckoutRequest) =>
       apiFetch<CheckoutResponse>('/api/checkout/cart', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
-    /** Initialize Paystack for an existing payment token. Requires merchant auth + CSRF. */
+    /** Initialize Paystack for an existing payment token. Public; CSRF is required. */
     initializePaystack: (paymentToken: string) =>
       apiFetch<{ authorizationUrl: string; reference: string }>('/api/checkout/paystack/initialize', {
         method: 'POST',

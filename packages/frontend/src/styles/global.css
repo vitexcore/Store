@@ -101,4 +101,10 @@
   .badge-draft     { @apply badge bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300; }
   .badge-active    { @apply badge bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300; }
   .badge-archived  { @apply badge bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400; }
+  .badge-out_of_stock   { @apply badge bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300; }
+  .badge-low_stock      { @apply badge bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300; }
+  .badge-inactive       { @apply badge bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300; }
+  .badge-critical       { @apply badge bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300; }
+  .badge-warning        { @apply badge bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300; }
+  .badge-info           { @apply badge bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300; }
 }

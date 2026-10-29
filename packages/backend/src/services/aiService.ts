@@ -16,7 +16,11 @@
 import OpenAI from 'openai';
 import type { Fetch } from 'openai/core';
 import { config } from '../config.js';
-import type { SalesAnalytics, InventoryAnalytics } from '@store/shared';
+import type {
+  SalesAnalytics,
+  InventoryAnalytics,
+  RestockRecommendations,
+} from '@store/shared';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,6 +55,17 @@ Inventory status definitions (strictly distinguish these — never treat as inte
 - Inactive products: products disabled for sale (status is draft or archived).
 - Attention needed: products that need merchant attention due to current stock levels (out of stock or low stock).
 
+Restocking recommendations (estimates only — always label uncertainty):
+- These are generated from current stock plus completed-sales velocity in a recent lookback window.
+- unitsSoldRecent: units sold in the lookback window (completed sales only).
+- dailyVelocity: estimated units sold per day.
+- daysOfStock: estimated days of stock remaining at current velocity (null when there are no recent sales).
+- suggestedQuantity: an estimated restock quantity to cover the target coverage days — always an estimate, never a purchase order, and null when data is insufficient.
+- dataReliable: true when backed by real completed-sales data; false when history is insufficient.
+- When dataReliable is false, say so clearly and do not present suggested quantities as dependable.
+- Never invent supplier details, supplier prices, delivery dates, or purchase orders.
+- Never place orders, contact suppliers, or reserve stock on the merchant's behalf.
+
 Strict restrictions:
 - You are strictly READ-ONLY. You cannot and must not create, edit, delete, or modify any orders, products, inventory, payments, purchase orders, or settings.
 - You cannot change stock quantities, modify thresholds, reserve stock, or place supplier orders.
@@ -78,6 +93,8 @@ export function isAiConfigured(): boolean {
  * @param question - The merchant's natural-language question (already validated, max 1000 chars).
  * @param analytics - Deterministic sales data fetched from the DB before this call.
  * @param inventoryOrFetch - Optional deterministic inventory intelligence OR fetch implementation (for backward compatibility).
+ * @param inventory - Optional deterministic inventory intelligence.
+ * @param restock - Optional deterministic restock recommendations.
  * @param maybeFetch - Optional custom fetch implementation (for testing).
  * @returns AiResult — either a text reply or a graceful failure with a code.
  */
@@ -85,16 +102,25 @@ export async function queryAssistant(
   _storeId: string,
   question: string,
   analytics: SalesAnalytics,
-  inventoryOrFetch?: InventoryAnalytics | Fetch | null,
+  inventory: InventoryAnalytics | null = null,
+  restock: RestockRecommendations | null = null,
   maybeFetch?: Fetch,
 ): Promise<AiResult> {
-  let inventory: InventoryAnalytics | null = null;
   let fetchImplementation: Fetch | undefined = maybeFetch;
 
-  if (typeof inventoryOrFetch === 'function') {
-    fetchImplementation = inventoryOrFetch;
-  } else if (inventoryOrFetch) {
-    inventory = inventoryOrFetch;
+  // Back-compat: some callers pass the Fetch function as a trailing argument
+  // after an inventory object (e.g. queryAssistant(s, q, a, inventory, fetchMock)).
+  if (typeof restock === 'function') {
+    fetchImplementation = restock;
+    restock = null;
+  }
+  if (typeof inventory === 'function') {
+    fetchImplementation = inventory;
+    inventory = null;
+    restock = null;
+  }
+  if (typeof maybeFetch === 'function') {
+    fetchImplementation = maybeFetch;
   }
 
   // Guard: no key → graceful unavailable
@@ -161,6 +187,33 @@ ${analyticsContext}
 --- PRODUCT & INVENTORY DATA (authoritative, do not modify or contradict) ---
 ${inventoryContext}
 --- END PRODUCT & INVENTORY DATA ---`;
+  }
+
+  if (restock) {
+    const restockContext = JSON.stringify(
+      {
+        dataCoverageNote: restock.dataCoverageNote,
+        recommendations: restock.recommendations.map((r) => ({
+          name: r.name,
+          currentStock: r.currentStock,
+          lowStockThreshold: r.lowStockThreshold,
+          unitsSoldRecent: r.unitsSoldRecent,
+          dailyVelocity: r.dailyVelocity,
+          daysOfStock: r.daysOfStock,
+          reason: r.reason,
+          suggestedQuantity: r.suggestedQuantity,
+          dataReliable: r.dataReliable,
+        })),
+      },
+      null,
+      2,
+    );
+
+    userMessage += `
+
+--- RESTOCK RECOMMENDATIONS (authoritative, do not modify or contradict) ---
+${restockContext}
+--- END RESTOCK RECOMMENDATIONS ---`;
   }
 
   try {

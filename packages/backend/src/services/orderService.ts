@@ -96,6 +96,68 @@ function validateCartInput(items: unknown): Array<{ productId: string; quantity:
   });
 }
 
+async function getExistingOrderResponse(
+  client: Awaited<ReturnType<typeof getClient>>,
+  storeId: string,
+  idempotencyKey: string,
+  expected: {
+    items: Array<{ productId: string; quantity: number }>;
+    customerName: string | null;
+    customerEmail: string | null;
+  },
+): Promise<CheckoutResponse | null> {
+  const orderResult = await client.query<{
+    id: string;
+    reference: string;
+    total_cents: number;
+    currency: string;
+    customer_name: string | null;
+    customer_email: string | null;
+  }>(
+    'SELECT id, reference, total_cents, currency, customer_name, customer_email FROM orders WHERE store_id = $1 AND idempotency_key = $2',
+    [storeId, idempotencyKey],
+  );
+  const order = orderResult.rows[0];
+  if (!order) return null;
+
+  const existingItems = await client.query<{ product_id: string | null; quantity: number }>(
+    'SELECT product_id, quantity FROM order_items WHERE order_id = $1',
+    [order.id],
+  );
+  const existingIdentity = existingItems.rows
+    .map((item) => item.product_id === null ? null : `${item.product_id.toLowerCase()}:${item.quantity}`)
+    .sort();
+  const expectedIdentity = expected.items
+    .map((item) => `${item.productId.toLowerCase()}:${item.quantity}`)
+    .sort();
+  if (
+    order.customer_name !== expected.customerName
+    || order.customer_email !== expected.customerEmail
+    || existingIdentity.length !== expectedIdentity.length
+    || existingIdentity.some((item, index) => item === null || item !== expectedIdentity[index])
+  ) {
+    throw new CheckoutError(
+      'This idempotency key was already used for a different checkout. Start a new checkout.',
+      'IDEMPOTENCY_KEY_REUSED',
+      409,
+    );
+  }
+
+  const txnResult = await client.query<{ payment_token: string; expires_at: string | null }>(
+    'SELECT payment_token, expires_at FROM transactions WHERE order_id = $1 ORDER BY created_at DESC LIMIT 1',
+    [order.id],
+  );
+  const txn = txnResult.rows[0];
+  return {
+    orderId: order.id,
+    orderReference: order.reference,
+    paymentToken: txn?.payment_token ?? '',
+    amountCents: order.total_cents,
+    currency: order.currency,
+    expiresAt: txn?.expires_at ?? new Date(Date.now() + PAYMENT_EXPIRY_MINUTES * 60_000).toISOString(),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Main: create order from cart
 // ---------------------------------------------------------------------------
@@ -118,7 +180,20 @@ export async function createOrderFromCart(
   storeSlug: string,
   input: CheckoutRequest,
 ): Promise<CheckoutResponse> {
-  const items = validateCartInput(input.items);
+  // Collapse repeated product IDs before checking stock. A client can submit
+  // duplicate lines even though the storefront UI normally emits one line per
+  // product; checking each line separately could otherwise oversell a single
+  // order and create duplicate inventory movements later.
+  const requestedItems = validateCartInput(input.items);
+  const quantities = new Map<string, number>();
+  for (const item of requestedItems) {
+    const quantity = (quantities.get(item.productId) ?? 0) + item.quantity;
+    if (quantity > 100) {
+      throw new CheckoutError('Combined quantity for a product cannot exceed 100.', 'VALIDATION_ERROR');
+    }
+    quantities.set(item.productId, quantity);
+  }
+  const items = [...quantities].map(([productId, quantity]) => ({ productId, quantity }));
 
   // Validate customer fields
   if (input.customerName !== undefined) {
@@ -141,6 +216,10 @@ export async function createOrderFromCart(
     throw new CheckoutError('idempotencyKey must be a string of 16–128 characters.', 'VALIDATION_ERROR');
   }
 
+  const customerName = input.customerName?.trim() ?? null;
+  const customerEmail = input.customerEmail?.trim().toLowerCase() ?? null;
+  const requestIdentity = { items, customerName, customerEmail };
+
   const client = await getClient();
   try {
     await client.query('BEGIN');
@@ -148,32 +227,10 @@ export async function createOrderFromCart(
     // -----------------------------------------------------------------
     // Idempotency check — return existing order if already created
     // -----------------------------------------------------------------
-    const idempCheck = await client.query<{
-      id: string; reference: string; total_cents: number; currency: string;
-    }>(
-      'SELECT id, reference, total_cents, currency FROM orders WHERE idempotency_key = $1',
-      [idempotencyKey],
-    );
-    if (idempCheck.rows[0]) {
-      // Find the associated transaction
-      const txnRow = await client.query<{
-        payment_token: string; expires_at: string | null;
-      }>(
-        'SELECT payment_token, expires_at FROM transactions WHERE order_id = $1 ORDER BY created_at DESC LIMIT 1',
-        [idempCheck.rows[0].id],
-      );
+    const existingOrder = await getExistingOrderResponse(client, storeId, idempotencyKey, requestIdentity);
+    if (existingOrder) {
       await client.query('ROLLBACK');
-
-      const existing = idempCheck.rows[0];
-      const txn = txnRow.rows[0];
-      return {
-        orderId: existing.id,
-        orderReference: existing.reference,
-        paymentToken: txn?.payment_token ?? '',
-        amountCents: existing.total_cents,
-        currency: existing.currency,
-        expiresAt: txn?.expires_at ?? new Date(Date.now() + PAYMENT_EXPIRY_MINUTES * 60_000).toISOString(),
-      };
+      return existingOrder;
     }
 
     // -----------------------------------------------------------------
@@ -232,6 +289,12 @@ export async function createOrderFromCart(
       }
 
       totalCents += product.price_cents * item.quantity;
+      // The schema stores all order and line totals as PostgreSQL INTEGER.
+      // Reject unrepresentable totals before attempting an insert so clients
+      // receive a validation response rather than a database error.
+      if (!Number.isSafeInteger(totalCents) || totalCents > 2_147_483_647) {
+        throw new CheckoutError('Order total exceeds the supported amount.', 'INVALID_AMOUNT', 422);
+      }
     }
 
     if (totalCents <= 0) {
@@ -247,18 +310,27 @@ export async function createOrderFromCart(
          (store_id, reference, status, total_cents, currency,
           customer_name, customer_email, idempotency_key)
        VALUES ($1, $2, 'pending', $3, $4, $5, $6, $7)
+       ON CONFLICT (store_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
        RETURNING id`,
       [
         storeId,
         reference,
         totalCents,
         currency,
-        input.customerName?.trim() ?? null,
-        input.customerEmail?.trim().toLowerCase() ?? null,
+        customerName,
+        customerEmail,
         idempotencyKey,
       ],
     );
-    const orderId = orderResult.rows[0]!.id;
+    const orderId = orderResult.rows[0]?.id;
+    if (!orderId) {
+      // Another request with this store/key committed while this transaction
+      // was preparing the same order. Return the durable original response.
+      const concurrentOrder = await getExistingOrderResponse(client, storeId, idempotencyKey, requestIdentity);
+      await client.query('ROLLBACK');
+      if (concurrentOrder) return concurrentOrder;
+      throw new Error('Idempotent order conflict could not be resolved.');
+    }
 
     // -----------------------------------------------------------------
     // Create order items (price snapshot at time of order)

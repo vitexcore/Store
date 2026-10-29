@@ -16,7 +16,7 @@ export function CheckoutFormPage() {
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const idempotencyKeyRef = useRef<string>(uuidv4());
+  const idempotencyKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const items = cartState.items;
   const currency = items[0]?.currency ?? 'NGN';
@@ -44,20 +44,24 @@ export function CheckoutFormPage() {
     setSubmitting(true);
     setError(null);
 
-    const res = await api.checkout.createOrder({
-      idempotencyKey: idempotencyKeyRef.current,
+    const orderPayload = {
       storeSlug,
       items: items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
       customerName: customerName.trim() || undefined,
       customerEmail: customerEmail.trim() || undefined,
-    });
+    };
+    const fingerprint = JSON.stringify(orderPayload);
+    if (idempotencyKeyRef.current?.fingerprint !== fingerprint) {
+      idempotencyKeyRef.current = { fingerprint, key: uuidv4() };
+    }
+    const idempotencyKey = idempotencyKeyRef.current.key;
+    const res = await api.checkout.createOrder({ idempotencyKey, ...orderPayload });
 
     if (res.ok) {
       clearCart();
       navigate(`/payment/${res.data.paymentToken}`);
     } else {
       setError(res.message);
-      idempotencyKeyRef.current = uuidv4();
     }
     setSubmitting(false);
   }, [submitting, items, storeSlug, validate, customerName, customerEmail, clearCart, navigate]);

@@ -459,16 +459,38 @@ describe('GET /api/dashboard', () => {
     expect(res.body.data.recentOrders).toHaveLength(0);
   });
 
-  it('counts only confirmed orders toward revenue', async () => {
+  it('counts only paid, confirmed orders in the store currency toward revenue', async () => {
     const m = await registerUser(uniqueEmail());
     const storeId = m.user.storeId;
     const suffix = Date.now();
 
-    // Insert a confirmed order directly (would normally come via checkout)
+    // A confirmed order only counts when a trusted transaction is paid.
+    const paidOrder = await query<{ id: string }>(
+      `INSERT INTO orders (store_id, reference, status, total_cents, currency)
+       VALUES ($1, $2, 'confirmed', 5000, 'NGN') RETURNING id`,
+      [storeId, `CONF-${suffix}`],
+    );
+    await query(
+      `INSERT INTO transactions (store_id, order_id, payment_token, status, amount_cents, currency, paid_at)
+       VALUES ($1, $2, $3, 'paid', 5000, 'NGN', NOW())`,
+      [storeId, paidOrder.rows[0]!.id, `dashboard-paid-${suffix}`],
+    );
+    // A manually confirmed but unpaid order is not verified revenue.
     await query(
       `INSERT INTO orders (store_id, reference, status, total_cents, currency)
-       VALUES ($1, $2, 'confirmed', 5000, 'GBP')`,
-      [storeId, `CONF-${suffix}`],
+       VALUES ($1, $2, 'confirmed', 99000, 'NGN')`,
+      [storeId, `UNPAID-${suffix}`],
+    );
+    // A paid order in a different currency must not be mixed into NGN totals.
+    const foreignOrder = await query<{ id: string }>(
+      `INSERT INTO orders (store_id, reference, status, total_cents, currency)
+       VALUES ($1, $2, 'confirmed', 7777, 'GBP') RETURNING id`,
+      [storeId, `FOREIGN-${suffix}`],
+    );
+    await query(
+      `INSERT INTO transactions (store_id, order_id, payment_token, status, amount_cents, currency, paid_at)
+       VALUES ($1, $2, $3, 'paid', 7777, 'GBP', NOW())`,
+      [storeId, foreignOrder.rows[0]!.id, `dashboard-foreign-${suffix}`],
     );
     // Insert a pending order (should NOT count toward revenue)
     await query(
@@ -479,7 +501,7 @@ describe('GET /api/dashboard', () => {
 
     const res = await authed('get', '/api/dashboard', m.cookies, m.csrfToken);
     expect(res.status).toBe(200);
-    expect(res.body.data.totalRevenueCents).toBe(5000); // only confirmed
+    expect(res.body.data.totalRevenueCents).toBe(5000);
     expect(res.body.data.confirmedOrderCount).toBe(1);
   });
 
@@ -513,11 +535,16 @@ describe('GET /api/dashboard', () => {
   it('does not leak another store\'s metrics', async () => {
     const a = await registerUser(uniqueEmail());
     const b = await registerUser(uniqueEmail());
-    // Add a confirmed order to store A
-    await query(
+    // Add a verified completed order to store A
+    const order = await query<{ id: string }>(
       `INSERT INTO orders (store_id, reference, status, total_cents, currency)
-       VALUES ($1, $2, 'confirmed', 9999, 'GBP')`,
+       VALUES ($1, $2, 'confirmed', 9999, 'NGN') RETURNING id`,
       [a.user.storeId, `ISO-${Date.now()}`],
+    );
+    await query(
+      `INSERT INTO transactions (store_id, order_id, payment_token, status, amount_cents, currency, paid_at)
+       VALUES ($1, $2, $3, 'paid', 9999, 'NGN', NOW())`,
+      [a.user.storeId, order.rows[0]!.id, `isolation-${Date.now()}`],
     );
     // B's dashboard should show zero revenue
     const res = await authed('get', '/api/dashboard', b.cookies, b.csrfToken);

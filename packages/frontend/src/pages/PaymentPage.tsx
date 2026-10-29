@@ -20,6 +20,8 @@ export function PaymentPage() {
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [initializingPayment, setInitializingPayment] = useState(false);
+  const [initializationError, setInitializationError] = useState<string | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startTimeRef = useRef(Date.now());
   const paymentUrl = `${window.location.origin}/payment/${token ?? ''}`;
@@ -35,6 +37,21 @@ export function PaymentPage() {
     }
     if (loading) setLoading(false);
   }, [token, loading]);
+
+  const initializePayment = useCallback(async () => {
+    if (!token || initializingPayment) return;
+    setInitializingPayment(true);
+    setInitializationError(null);
+    const result = await api.checkout.initializePaystack(token);
+    if (result.ok) {
+      setPaymentStatus((current) => current
+        ? { ...current, paystackAuthorizationUrl: result.data.authorizationUrl }
+        : current);
+    } else {
+      setInitializationError(result.message);
+    }
+    setInitializingPayment(false);
+  }, [token, initializingPayment]);
 
   const scheduleNextPoll = useCallback((currentStatus: string) => {
     if (isTerminal(currentStatus)) return;
@@ -159,7 +176,24 @@ export function PaymentPage() {
                   >
                     Pay with Paystack →
                   </a>
-                ) : null}
+                ) : (
+                  <div className="w-full space-y-2">
+                    <button
+                      type="button"
+                      onClick={initializePayment}
+                      disabled={initializingPayment}
+                      aria-busy={initializingPayment}
+                      className="w-full rounded-lg bg-brand-600 px-6 py-3 text-sm font-semibold text-white text-center hover:bg-brand-700 transition-colors disabled:opacity-60 disabled:cursor-wait"
+                    >
+                      {initializingPayment ? 'Preparing Paystack checkout…' : 'Prepare Paystack test checkout'}
+                    </button>
+                    {initializationError && (
+                      <p className="text-xs text-red-600 dark:text-red-400 text-center" role="alert">
+                        {initializationError}
+                      </p>
+                    )}
+                  </div>
+                )}
                 <PollingIndicator />
               </div>
             )}

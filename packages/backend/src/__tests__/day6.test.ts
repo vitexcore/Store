@@ -35,10 +35,21 @@ import request from 'supertest';
 import crypto from 'node:crypto';
 import { createApp } from '../app.js';
 import { closePool, query, getClient } from '../db/pool.js';
-import { processPaystackWebhook } from '../services/paystackService.js';
+import { isPaystackTestKey, processPaystackWebhook } from '../services/paystackService.js';
 import type { Express } from 'express';
 
 const app: Express = createApp() as unknown as Express;
+
+describe('Paystack mode boundary', () => {
+  it('accepts test keys and refuses live or malformed keys', () => {
+    expect(isPaystackTestKey('sk_test_example_key')).toBe(true);
+    expect(isPaystackTestKey('sk_test_CHANGE_ME')).toBe(false);
+    expect(isPaystackTestKey('sk_test_your_key_here')).toBe(false);
+    expect(isPaystackTestKey('sk_live_example_key')).toBe(false);
+    expect(isPaystackTestKey('')).toBe(false);
+    expect(isPaystackTestKey(null)).toBe(false);
+  });
+});
 
 function uniqueEmail(): string {
   return `d6-${Date.now()}-${Math.floor(Math.random() * 100000)}@example.com`;
@@ -380,19 +391,46 @@ describe('Expired payment tokens', () => {
 // Cross-store payment isolation
 // ---------------------------------------------------------------------------
 
-describe('Cross-store payment isolation', () => {
-  it('merchant cannot initialize Paystack payment for a different store token', async () => {
+describe('Public payment initialization', () => {
+  it('accepts an anonymous CSRF-protected buyer request without a merchant session', async () => {
     const m1 = await registerUser(uniqueEmail());
-    const m2 = await registerUser(uniqueEmail());
-
     const { slug: slug1, productId: pid1 } = await setupStoreWithProduct(m1);
     const order1 = await createOrder(m1, slug1, pid1);
+    const { csrfToken, cookies } = await getCsrfToken('');
 
-    const res = await authed('post', '/api/checkout/paystack/initialize', m2.cookies, m2.csrfToken, {
-      paymentToken: order1.paymentToken,
-    });
-    expect(res.status).toBe(403);
-    expect(res.body.code).toBe('FORBIDDEN');
+    const res = await request(app)
+      .post('/api/checkout/paystack/initialize')
+      .set('Cookie', cookies)
+      .set('x-csrf-token', csrfToken)
+      .send({ paymentToken: order1.paymentToken });
+
+    // Tests run without provider credentials; this confirms the request passes
+    // CSRF and does not require a merchant session, then fails closed.
+    expect(res.status).toBe(503);
+    expect(res.body.code).toBe('PAYMENT_PROVIDER_NOT_CONFIGURED');
+  });
+
+  it('maps a Paystack callback reference to the payment page without confirming payment', async () => {
+    const merchant = await registerUser(uniqueEmail());
+    const { slug, productId } = await setupStoreWithProduct(merchant);
+    const order = await createOrder(merchant, slug, productId);
+    const paystackReference = `callback_${crypto.randomUUID()}`;
+
+    await query(
+      'UPDATE transactions SET paystack_reference = $1 WHERE payment_token = $2',
+      [paystackReference, order.paymentToken],
+    );
+
+    const callback = await request(app)
+      .get('/api/checkout/paystack/callback')
+      .query({ reference: paystackReference });
+
+    expect(callback.status).toBe(302);
+    expect(callback.headers.location).toMatch(new RegExp(`/payment/${order.paymentToken}$`));
+
+    const status = await request(app).get(`/api/checkout/status/${order.paymentToken}`);
+    expect(status.status).toBe(200);
+    expect(status.body.data.status).not.toBe('paid');
   });
 });
 

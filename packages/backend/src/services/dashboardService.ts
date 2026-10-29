@@ -2,8 +2,8 @@
  * Dashboard service — aggregated metrics from real DB data.
  *
  * Rules (per spec):
- *  - Revenue = sum of total_cents of CONFIRMED orders only (not pending/failed/cancelled).
- *  - Order count = count of confirmed orders.
+ *  - Revenue and order count include only confirmed orders with a paid
+ *    transaction, in the store's default currency.
  *  - Low-stock = products with stock_quantity <= low_stock_threshold (non-archived).
  *  - Recent orders = last 5 orders (any status) for the activity feed.
  */
@@ -32,8 +32,16 @@ export async function getDashboardMetrics(storeId: string): Promise<DashboardMet
   // Single aggregated query for metrics — join stores to pick up the default currency
   const metricsResult = await query<MetricsRow & { default_currency: string }>(
     `SELECT
-       COALESCE(SUM(CASE WHEN o.status = 'confirmed' THEN o.total_cents ELSE 0 END), 0) AS total_revenue_cents,
-       COUNT(CASE WHEN o.status = 'confirmed' THEN 1 END)                                AS confirmed_order_count,
+       COALESCE(SUM(CASE WHEN o.status = 'confirmed'
+                           AND o.currency = s.default_currency
+                           AND EXISTS (SELECT 1 FROM transactions t
+                                       WHERE t.order_id = o.id AND t.status = 'paid')
+                         THEN o.total_cents ELSE 0 END), 0) AS total_revenue_cents,
+       COUNT(DISTINCT CASE WHEN o.status = 'confirmed'
+                             AND o.currency = s.default_currency
+                             AND EXISTS (SELECT 1 FROM transactions t
+                                         WHERE t.order_id = o.id AND t.status = 'paid')
+                           THEN o.id END) AS confirmed_order_count,
        (SELECT COUNT(*) FROM products WHERE store_id = $1 AND status = 'active')         AS active_product_count,
        (SELECT COUNT(*) FROM products
         WHERE store_id = $1 AND status <> 'archived'

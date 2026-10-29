@@ -8,13 +8,18 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { CartProvider } from '../lib/cart.js';
 import { api } from '../lib/api.js';
-import type { SalesAnalytics } from '@store/shared';
 import { DashboardPage } from '../pages/DashboardPage.tsx';
 import { CheckoutPage } from '../pages/CheckoutPage.tsx';
 import { AssistantPage } from '../pages/AssistantPage.tsx';
+import { InventoryAlertsSection } from '../components/inventory/InventoryAlertsSection.tsx';
+import { RestockRecommendationsSection } from '../components/inventory/RestockRecommendationsSection.tsx';
+import { PaymentPage } from '../pages/PaymentPage.tsx';
+import { CheckoutFormPage } from '../pages/CheckoutFormPage.tsx';
 import { NotFoundPage } from '../pages/NotFoundPage.tsx';
+import type { SalesAnalytics, InventoryAlerts, RestockRecommendations, PaymentStatusResponse } from '@store/shared';
 
 // Mock the api module so DashboardPage doesn't make real HTTP calls in tests
 vi.mock('../lib/api.js', () => ({
@@ -30,6 +35,15 @@ vi.mock('../lib/api.js', () => ({
     },
     assistant: {
       query: vi.fn().mockResolvedValue({ ok: false, code: 'NETWORK_ERROR', message: 'No server in test' }),
+    },
+    checkout: {
+      createOrder: vi.fn().mockResolvedValue({ ok: false, code: 'NETWORK_ERROR', message: 'Could not reach the server. Please check your connection.' }),
+      getPaymentStatus: vi.fn().mockResolvedValue({ ok: false, code: 'NETWORK_ERROR', message: 'No server in test' }),
+      initializePaystack: vi.fn().mockResolvedValue({ ok: false, code: 'PAYMENT_PROVIDER_NOT_CONFIGURED', message: 'Paystack test credentials are not configured.' }),
+    },
+    inventory: {
+      alerts: vi.fn().mockResolvedValue({ ok: true, data: { alerts: [], counts: { outOfStock: 0, lowStock: 0, inactive: 0, total: 0, critical: 0 } } as InventoryAlerts }),
+      restockRecommendations: vi.fn().mockResolvedValue({ ok: true, data: { recommendations: [], dataCoverageNote: '' } as RestockRecommendations }),
     },
   },
 }));
@@ -66,6 +80,112 @@ describe('CheckoutPage', () => {
   it('shows the payment security disclaimer', () => {
     render(<CheckoutPage />, { wrapper: Wrapper });
     expect(screen.getByText(/payment status is determined exclusively/i)).toBeInTheDocument();
+  });
+});
+
+describe('CheckoutFormPage order retry', () => {
+  const cart = {
+    storeSlug: 'test-store',
+    items: [{
+      productId: '123e4567-e89b-42d3-a456-426614174000',
+      quantity: 1,
+      name: 'Test Widget',
+      priceCents: 250000,
+      currency: 'NGN',
+      imageUrl: null,
+      maxStock: 10,
+    }],
+  };
+
+  const renderCheckout = () => {
+    sessionStorage.setItem('store_cart_v1', JSON.stringify(cart));
+    return render(
+      <CartProvider>
+        <MemoryRouter initialEntries={['/store/test-store/checkout']}>
+          <Routes>
+            <Route path="/store/:storeSlug/checkout" element={<CheckoutFormPage />} />
+          </Routes>
+        </MemoryRouter>
+      </CartProvider>,
+    );
+  };
+
+  it('reuses the same idempotency key after an ambiguous checkout failure', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.checkout.createOrder).mockReset().mockResolvedValue({
+      ok: false,
+      code: 'NETWORK_ERROR',
+      message: 'Could not reach the server. Please check your connection.',
+    });
+
+    renderCheckout();
+    const submit = await screen.findByRole('button', { name: /place order/i });
+    await user.click(submit);
+    await screen.findByRole('alert');
+    await user.click(submit);
+
+    expect(api.checkout.createOrder).toHaveBeenCalledTimes(2);
+    const firstRequest = vi.mocked(api.checkout.createOrder).mock.calls[0]![0];
+    const retryRequest = vi.mocked(api.checkout.createOrder).mock.calls[1]![0];
+    expect(retryRequest.idempotencyKey).toBe(firstRequest.idempotencyKey);
+  });
+});
+
+describe('PaymentPage', () => {
+  const paymentStatus: PaymentStatusResponse = {
+    paymentToken: 'a'.repeat(96),
+    status: 'awaiting_payment',
+    amountCents: 300000,
+    currency: 'NGN',
+    orderReference: 'ORD-TEST01',
+    storeName: 'Test Store',
+    expiresAt: null,
+    paidAt: null,
+    paystackAuthorizationUrl: null,
+  };
+
+  const renderPaymentPage = () => render(
+    <MemoryRouter initialEntries={[`/payment/${paymentStatus.paymentToken}`]}>
+      <Routes>
+        <Route path="/payment/:token" element={<PaymentPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  it('initializes Paystack only after buyer action and then shows the provider link', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.checkout.getPaymentStatus).mockResolvedValueOnce({ ok: true, data: paymentStatus });
+    vi.mocked(api.checkout.initializePaystack).mockResolvedValueOnce({
+      ok: true,
+      data: { authorizationUrl: 'https://checkout.paystack.com/test', reference: 'store-test-reference' },
+    });
+
+    renderPaymentPage();
+    const prepareButton = await screen.findByRole('button', { name: /prepare paystack test checkout/i });
+    expect(api.checkout.initializePaystack).not.toHaveBeenCalled();
+
+    await user.click(prepareButton);
+
+    expect(api.checkout.initializePaystack).toHaveBeenCalledWith(paymentStatus.paymentToken);
+    expect(await screen.findByRole('link', { name: /pay with paystack/i })).toHaveAttribute(
+      'href',
+      'https://checkout.paystack.com/test',
+    );
+  });
+
+  it('shows a recoverable message when Paystack is not configured', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.checkout.getPaymentStatus).mockResolvedValueOnce({ ok: true, data: paymentStatus });
+    vi.mocked(api.checkout.initializePaystack).mockResolvedValueOnce({
+      ok: false,
+      code: 'PAYMENT_PROVIDER_NOT_CONFIGURED',
+      message: 'Paystack test credentials are not configured.',
+    });
+
+    renderPaymentPage();
+    await user.click(await screen.findByRole('button', { name: /prepare paystack test checkout/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/paystack test credentials are not configured/i);
   });
 });
 
@@ -236,6 +356,97 @@ describe('AssistantPage', () => {
     expect(reply).toHaveTextContent('You have 10 products in total');
     expect(screen.getByLabelText('Inventory metrics summary')).toBeInTheDocument();
     expect(screen.getByText('10')).toBeInTheDocument();
+  });
+});
+
+describe('InventoryAlertsSection', () => {
+  it('renders empty state when no alerts exist', async () => {
+    render(<InventoryAlertsSection />, { wrapper: Wrapper });
+    expect(screen.getByRole('heading', { name: /inventory alerts/i })).toBeInTheDocument();
+    await expect(screen.findByText('No inventory alerts')).resolves.toBeInTheDocument();
+  });
+
+  it('renders alert table and severity badges when alerts exist', async () => {
+    vi.mocked(api.inventory.alerts).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        alerts: [
+          {
+            id: 'p1:out_of_stock',
+            productId: 'p1',
+            name: 'Widget',
+            stockQuantity: 0,
+            lowStockThreshold: 5,
+            status: 'active',
+            type: 'out_of_stock',
+            reason: 'No units left in stock — product cannot be purchased.',
+            severity: 'critical',
+            lastUpdated: '2026-01-01T00:00:00Z',
+            unavailable: true,
+          },
+          {
+            id: 'p2:low_stock',
+            productId: 'p2',
+            name: 'Gadget',
+            stockQuantity: 2,
+            lowStockThreshold: 5,
+            status: 'active',
+            type: 'low_stock',
+            reason: '2 unit(s) left — at or below the low-stock threshold of 5.',
+            severity: 'warning',
+            lastUpdated: '2026-01-02T00:00:00Z',
+            unavailable: false,
+          },
+        ],
+        counts: { outOfStock: 1, lowStock: 1, inactive: 0, total: 2, critical: 1 },
+      } as InventoryAlerts,
+    });
+
+    render(<InventoryAlertsSection />, { wrapper: Wrapper });
+    await expect(screen.findByText('Widget')).resolves.toBeInTheDocument();
+    await expect(screen.findByText('Gadget')).resolves.toBeInTheDocument();
+    // Summary chip + severity badge both render the type label, so count all matches.
+    expect(await screen.findAllByText('Out of stock')).toHaveLength(2);
+    expect(await screen.findAllByText('Low stock')).toHaveLength(2);
+    expect(await screen.findAllByText('Critical')).toHaveLength(2);
+    expect(await screen.findAllByText('Warning')).toHaveLength(1);
+  });
+});
+
+describe('RestockRecommendationsSection', () => {
+  it('renders empty state when no recommendations exist', async () => {
+    render(<RestockRecommendationsSection />, { wrapper: Wrapper });
+    expect(screen.getByRole('heading', { name: /restock recommendations/i })).toBeInTheDocument();
+    await expect(screen.findByText('No restocking needed')).resolves.toBeInTheDocument();
+  });
+
+  it('renders recommendation table with estimated quantities', async () => {
+    vi.mocked(api.inventory.restockRecommendations).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        recommendations: [
+          {
+            productId: 'p1',
+            name: 'Widget',
+            currentStock: 0,
+            lowStockThreshold: 5,
+            unitsSoldRecent: 10,
+            dailyVelocity: 0.3333,
+            daysOfStock: 0,
+            reason: 'out_of_stock',
+            suggestedQuantity: 7,
+            dataReliable: true,
+          },
+        ],
+        dataCoverageNote: 'Based on 10 unit(s) sold in the last 30 days.',
+      } as RestockRecommendations,
+    });
+
+    render(<RestockRecommendationsSection />, { wrapper: Wrapper });
+    await expect(screen.findByText('Widget')).resolves.toBeInTheDocument();
+    await expect(screen.findByText('Out of stock')).resolves.toBeInTheDocument();
+    await expect(screen.findByText('7')).resolves.toBeInTheDocument();
+    await expect(screen.findByText('est.')).resolves.toBeInTheDocument();
   });
 });
 
